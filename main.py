@@ -21,6 +21,8 @@ from py.storage import Storage
 from py.asr import SherpaASR
 from py.llm import AIProcessor
 from py.io import ensure_data_dir
+from py.presets import AiPresetStore
+from py.processing_presets import ProcessingPresetStore
 from py import model_manager as _mm
 from py import model_registry as _mr
 
@@ -51,10 +53,14 @@ class SherpaNoteAPI(Bridge):
         self._storage = Storage()
         self._asr: SherpaASR | None = None
         self._ai: AIProcessor | None = None
+        self._preset_store = AiPresetStore()
+        self._processing_preset_store = ProcessingPresetStore()
         self._model_installer = _mm.ModelInstaller(
             self._config.asr.model_dir or _DEFAULT_MODELS_DIR,
             mirror_url=self._config.asr.mirror_url,
         )
+        # Track record IDs with unsaved changes for exit-time versioning.
+        self._dirty_record_ids: set[str] = set()
 
     def dispatch_task(self, command: str, args: Any) -> Any:
         """Dispatch commands for run_on_main_thread.
@@ -117,6 +123,7 @@ class SherpaNoteAPI(Bridge):
             active_streaming_model=self._config.asr.active_streaming_model,
             active_offline_model=self._config.asr.active_offline_model,
             mirror_url=self._config.asr.mirror_url,
+            auto_punctuate=self._config.asr.auto_punctuate,
         )
 
     @expose
@@ -237,10 +244,12 @@ class SherpaNoteAPI(Bridge):
                 # Now transcribe the file (safe on background thread)
                 logger.info("Starting transcribe_file for: %s", file_path)
                 segments = self._asr.transcribe_file(file_path, on_progress=on_progress)
+                full_text = " ".join(s["text"] for s in segments)
+                full_text = self._apply_punctuation(full_text)
                 logger.info("transcribe_file completed, emitting event")
                 self._emit("transcribe_complete", {
                     "segments": segments,
-                    "text": " ".join(s["text"] for s in segments),
+                    "text": full_text,
                     "audio_path": file_path,
                 })
             except Exception as exc:
@@ -256,43 +265,87 @@ class SherpaNoteAPI(Bridge):
     def _get_ai(self) -> AIProcessor:
         """Lazy-initialize AI processor."""
         if self._ai is None:
-            self._ai = AIProcessor(self._config.ai)
+            self._ai = AIProcessor(self._config.ai, max_tokens_mode=self._config.max_tokens_mode)
         return self._ai
+
+    def _apply_punctuation(self, text: str) -> str:
+        """Apply AI-based punctuation restoration if enabled and AI is configured.
+
+        Returns the original text if punctuation is disabled or AI is unavailable.
+        """
+        if not self._config.asr.auto_punctuate:
+            return text
+        if not self._config.ai.api_key and not self._config.ai.base_url:
+            logger.warning("Auto-punctuate enabled but no AI configured, skipping")
+            return text
+        try:
+            return self._get_ai().restore_punctuation(text)
+        except Exception as exc:
+            logger.warning("Punctuation restoration failed: %s, using raw text", exc)
+            return text
 
     @expose
     def test_ai_connection(self) -> dict:
         """Test the AI configuration by sending a minimal request."""
         try:
-            result = self._get_ai().process("Hello", "polish")
+            result, _ = self._get_ai().process("Hello", "polish")
             return {"success": True, "data": {"response": result[:200]}}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     @expose
-    def process_text(self, text: str, mode: str) -> dict:
-        """Process text with AI. Mode: polish / note / mindmap / brainstorm."""
+    def test_ai_preset_connection(self, config: dict) -> dict:
+        """Test an AI connection using an inline config dict.
+
+        config must contain: provider, model. Optional: api_key, base_url.
+        Sends a minimal request and returns success/failure.
+        """
+        test_config = AiConfig(
+            provider=config.get("provider", "openai"),
+            model=config.get("model", ""),
+            api_key=config.get("api_key"),
+            base_url=config.get("base_url"),
+            temperature=config.get("temperature", 0.7),
+            max_tokens=config.get("max_tokens", 8192),
+        )
+
         try:
-            result = self._get_ai().process(text, mode)
-            return {"success": True, "data": {"result": result}}
+            proc = AIProcessor(test_config)
+            result, _ = proc.process("Hello", "polish")
+            return {"success": True, "data": {"response": result[:200]}}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     @expose
-    def process_text_stream(self, text: str, mode: str) -> dict:
-        """Stream AI results. Tokens pushed via _emit('ai_token')."""
+    def process_text(self, text: str, mode: str, custom_prompt: str = None) -> dict:
+        """Process text with AI. Mode: polish / note / mindmap / brainstorm.
+        custom_prompt: optional prompt template with {text} placeholder."""
         try:
-            def on_token(chunk: str) -> None:
-                self._emit("ai_token", {"text": chunk})
-
-            result = self._get_ai().process_stream(text, mode, on_token=on_token)
-            if self._get_ai()._cancel_event.is_set():
-                self._emit("ai_error", {"error": "Cancelled"})
-                return {"success": False, "error": "Cancelled"}
-            self._emit("ai_complete", {"result": result})
-            return {"success": True, "data": {"result": result}}
+            result, truncated = self._get_ai().process(text, mode, custom_prompt=custom_prompt)
+            return {"success": True, "data": {"result": result, "truncated": truncated}}
         except Exception as e:
-            self._emit("ai_error", {"error": str(e)})
             return {"success": False, "error": str(e)}
+
+    @expose
+    def process_text_stream(self, text: str, mode: str, custom_prompt: str = None) -> dict:
+        """Stream AI results. Tokens pushed via _emit('ai_token').
+        custom_prompt: optional prompt template with {text} placeholder.
+        Streaming runs in a background thread to avoid blocking the main thread."""
+        def _work() -> None:
+            try:
+                def on_token(chunk: str) -> None:
+                    self._emit("ai_token", {"text": chunk})
+
+                result, truncated = self._get_ai().process_stream(text, mode, on_token=on_token, custom_prompt=custom_prompt)
+                if self._get_ai()._cancel_event.is_set():
+                    self._emit("ai_error", {"error": "Cancelled"})
+                    return
+                self._emit("ai_complete", {"result": result, "truncated": truncated})
+            except Exception as e:
+                self._emit("ai_error", {"error": str(e)})
+
+        threading.Thread(target=_work, daemon=True).start()
+        return {"success": True, "data": {"status": "streaming"}}
 
     @expose
     def cancel_ai(self) -> dict:
@@ -301,6 +354,80 @@ class SherpaNoteAPI(Bridge):
             self._ai.cancel()
             return {"success": True, "data": {"status": "cancelled"}}
         return {"success": False, "error": "No active AI session"}
+
+    @expose
+    def continue_text_stream(self, previous_output: str, mode: str, custom_prompt: str = None) -> dict:
+        """Continue AI output from where it was truncated.
+
+        Takes the previous output and asks the AI to continue from the last point.
+        Streams continuation tokens via _emit('ai_token').
+        Runs in a background thread to avoid blocking the main thread.
+        """
+        def _work() -> None:
+            try:
+                def on_token(chunk: str) -> None:
+                    self._emit("ai_token", {"text": chunk})
+
+                result, truncated = self._get_ai().continue_stream(
+                    previous_output, mode, on_token=on_token, custom_prompt=custom_prompt
+                )
+                if self._get_ai()._cancel_event.is_set():
+                    self._emit("ai_error", {"error": "Cancelled"})
+                    return
+                self._emit("ai_continue_complete", {"result": result, "truncated": truncated})
+            except Exception as e:
+                self._emit("ai_error", {"error": str(e)})
+
+        threading.Thread(target=_work, daemon=True).start()
+        return {"success": True, "data": {"status": "streaming"}}
+
+    def _auto_process_record(self, record: dict) -> dict:
+        """Run configured auto AI processing modes on a record.
+
+        Processes each mode non-streamingly in sequence, saves results
+        to the record, and emits progress events.
+        """
+        text = record.get("transcript", "")
+        if not text.strip():
+            return record
+
+        ai_results = dict(record.get("ai_results", {}) or {})
+
+        for mode in self._config.auto_ai_modes:
+            try:
+                self._emit("auto_ai_progress", {
+                    "record_id": record["id"],
+                    "mode": mode,
+                    "status": "processing",
+                })
+                result, _ = self._get_ai().process(text, mode)
+                ai_results[mode] = result
+                self._emit("auto_ai_progress", {
+                    "record_id": record["id"],
+                    "mode": mode,
+                    "status": "done",
+                })
+            except Exception as exc:
+                logger.warning("Auto AI processing mode=%s failed: %s", mode, exc)
+                self._emit("auto_ai_progress", {
+                    "record_id": record["id"],
+                    "mode": mode,
+                    "status": "error",
+                    "error": str(exc),
+                })
+
+        if ai_results:
+            record = self._storage.save({
+                **record,
+                "ai_results": ai_results,
+            })
+            record = self._annotate_record(record)
+
+        self._emit("auto_ai_complete", {
+            "record_id": record["id"],
+            "modes": list(ai_results.keys()),
+        })
+        return record
 
     # ---- Data Persistence ----
 
@@ -422,6 +549,7 @@ class SherpaNoteAPI(Bridge):
                 logger.info("retranscribe_record: transcribing file %s", audio_path)
                 segments = self._asr.transcribe_file(audio_path, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
+                full_text = self._apply_punctuation(full_text)
                 logger.info("retranscribe_record: transcription done, %d segments, saving...", len(segments))
                 updated = self._storage.save({
                     "id": record_id,
@@ -452,12 +580,58 @@ class SherpaNoteAPI(Bridge):
         return {"success": True, "data": versions}
 
     @expose
+    def save_version(self, record_id: str) -> dict:
+        """Create an explicit version snapshot for a record.
+
+        Call this from the "Save Version" button or on navigation-away.
+        Also marks the record as clean (not dirty).
+        """
+        try:
+            version = self._storage.create_version(
+                record_id, max_versions=self._config.max_versions
+            )
+            self._dirty_record_ids.discard(record_id)
+            logger.info("Saved version %d for record %s", version, record_id)
+            return {"success": True, "data": {"version": version}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def mark_dirty(self, record_id: str) -> dict:
+        """Mark a record as having unsaved changes (for exit-time versioning)."""
+        self._dirty_record_ids.add(record_id)
+        return {"success": True, "data": None}
+
+    @expose
+    def mark_clean(self, record_id: str) -> dict:
+        """Mark a record as clean (no unsaved changes)."""
+        self._dirty_record_ids.discard(record_id)
+        return {"success": True, "data": None}
+
+    @expose
     def restore_version(self, record_id: str, version: int) -> dict:
-        """Restore a record to a specific version."""
+        """Restore a record to a specific version.
+
+        Creates a new version snapshot of the restored content so
+        the user can see which version is "current" and revert if needed.
+        """
         record = self._storage.restore_version(record_id, version)
         if record is None:
             return {"success": False, "error": "Version not found."}
+        # Create a version snapshot of the restored state
+        new_ver = self._storage.create_version(
+            record_id, max_versions=self._config.max_versions
+        )
+        record["version"] = new_ver
         return {"success": True, "data": record}
+
+    @expose
+    def delete_version(self, record_id: str, version: int) -> dict:
+        """Delete a single version from a record's version history."""
+        success = self._storage.delete_version(record_id, version)
+        if not success:
+            return {"success": False, "error": "Version not found."}
+        return {"success": True, "data": {"version": version}}
 
     # ---- Export ----
 
@@ -573,6 +747,7 @@ class SherpaNoteAPI(Bridge):
                 logger.info("import_and_transcribe: transcribing %s", dest)
                 segments = self._asr.transcribe_file(dest, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
+                full_text = self._apply_punctuation(full_text)
                 logger.info("import_and_transcribe: saving record")
                 record = self._storage.save({
                     "title": rec_title,
@@ -582,6 +757,11 @@ class SherpaNoteAPI(Bridge):
                     "duration_seconds": 0,
                 })
                 record = self._annotate_record(record)
+
+                # Auto AI processing after transcription.
+                if self._config.auto_ai_modes and self._config.ai.api_key:
+                    record = self._auto_process_record(record)
+
                 self._emit("import_transcribe_complete", {
                     "record_id": record["id"],
                     "record": record,
@@ -729,6 +909,88 @@ class SherpaNoteAPI(Bridge):
             return {"success": False, "error": "No file selected"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ---- AI Provider Presets ----
+
+    @expose
+    def list_ai_presets(self) -> dict:
+        """List all AI provider presets."""
+        presets = self._preset_store.list()
+        return {"success": True, "data": presets}
+
+    @expose
+    def create_ai_preset(self, data: dict) -> dict:
+        """Create a new AI provider preset."""
+        preset = self._preset_store.create(data)
+        return {"success": True, "data": preset}
+
+    @expose
+    def update_ai_preset(self, preset_id: str, data: dict) -> dict:
+        """Update an AI provider preset."""
+        preset = self._preset_store.update(preset_id, data)
+        if preset is None:
+            return {"success": False, "error": f"Preset not found: {preset_id}"}
+        return {"success": True, "data": preset}
+
+    @expose
+    def delete_ai_preset(self, preset_id: str) -> dict:
+        """Delete an AI provider preset."""
+        success = self._preset_store.delete(preset_id)
+        return {"success": success, "data": {"preset_id": preset_id}}
+
+    @expose
+    def set_active_ai_preset(self, preset_id: str) -> dict:
+        """Set a preset as active and update the app's AI config."""
+        preset = self._preset_store.set_active(preset_id)
+        if preset is None:
+            return {"success": False, "error": f"Preset not found: {preset_id}"}
+        # Sync the active preset into the app's AiConfig.
+        self._config = AppConfig(
+            data_dir=self._config.data_dir,
+            asr=self._config.asr,
+            ai=AiConfig(
+                provider=preset["provider"],
+                model=preset["model"],
+                api_key=preset.get("api_key"),
+                base_url=preset.get("base_url"),
+                temperature=preset.get("temperature", 0.7),
+                max_tokens=preset.get("max_tokens", 8192),
+            ),
+            max_versions=self._config.max_versions,
+        )
+        self._config_store.save(self._config)
+        self._ai = None  # Reset AI processor to pick up new config.
+        return {"success": True, "data": preset}
+
+    # ---- AI Processing Presets ----
+
+    @expose
+    def list_processing_presets(self) -> dict:
+        """List all AI processing presets."""
+        presets = self._processing_preset_store.list()
+        return {"success": True, "data": presets}
+
+    @expose
+    def create_processing_preset(self, data: dict) -> dict:
+        """Create a new AI processing preset."""
+        preset = self._processing_preset_store.create(data)
+        return {"success": True, "data": preset}
+
+    @expose
+    def update_processing_preset(self, preset_id: str, data: dict) -> dict:
+        """Update an AI processing preset."""
+        preset = self._processing_preset_store.update(preset_id, data)
+        if preset is None:
+            return {"success": False, "error": f"Preset not found: {preset_id}"}
+        return {"success": True, "data": preset}
+
+    @expose
+    def delete_processing_preset(self, preset_id: str) -> dict:
+        """Delete a custom AI processing preset."""
+        success = self._processing_preset_store.delete(preset_id)
+        if not success:
+            return {"success": False, "error": "Cannot delete built-in presets"}
+        return {"success": True, "data": {"preset_id": preset_id}}
 
     # ---- Config ----
 
@@ -958,6 +1220,22 @@ if __name__ == "__main__":
     try:
         api = SherpaNoteAPI()
         app = App(api, title="SherpaNote", frontend_dir="frontend_dist")
+
+        def _shutdown_cleanup() -> None:
+            """Save versions for any dirty records before process exit."""
+            for rid in list(api._dirty_record_ids):
+                try:
+                    ver = api._storage.create_version(
+                        rid, max_versions=api._config.max_versions
+                    )
+                    logger.info("Auto-saved version %d for record %s on exit", ver, rid)
+                except Exception as exc:
+                    logger.warning("Failed to auto-save version for %s: %s", rid, exc)
+            api._storage.close()
+
+        import atexit
+        atexit.register(_shutdown_cleanup)
+
         app.run()
     except Exception as e:
         logging.critical("Failed to start app: %s", e, exc_info=True)

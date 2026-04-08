@@ -58,7 +58,7 @@ export function useAiProcess() {
   }
 
   /** Start AI processing with streaming. */
-  async function processText(text: string, mode?: AiMode): Promise<void> {
+  async function processText(text: string, mode?: AiMode, customPrompt?: string | null): Promise<void> {
     if (!text.trim()) return;
 
     const targetMode = mode ?? currentMode.value;
@@ -73,7 +73,7 @@ export function useAiProcess() {
       startListening();
     }
 
-    await call("process_text_stream", text, targetMode);
+    await call("process_text_stream", text, targetMode, customPrompt ?? null);
   }
 
   /** Save the current AI result to a record. */

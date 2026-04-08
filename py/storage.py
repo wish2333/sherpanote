@@ -84,6 +84,7 @@ class Storage:
     def save(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert or update a record. Auto-generates id and timestamps.
 
+        Does NOT create version snapshots -- use create_version() explicitly.
         For updates, provided fields are merged with existing record data
         to avoid unintended overwrites of unspecified fields.
         """
@@ -94,15 +95,8 @@ class Storage:
         is_update = bool(data.get("id"))
 
         if is_update:
-            # Create version snapshot before updating
             existing = self.get(record_id)
             if existing:
-                version = existing.get("version", 0) + 1
-                conn.execute(
-                    "INSERT OR REPLACE INTO versions (record_id, version, transcript, ai_results_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (record_id, version, existing["transcript"], existing["ai_results_json"], now),
-                )
-                data["version"] = version
                 # Merge: use existing values as defaults for any field not provided.
                 merged = dict(existing)
                 merged.update(data)
@@ -137,7 +131,10 @@ class Storage:
             ),
         )
         conn.commit()
-        return self.get(record_id)  # type: ignore[return-value]
+        result = self.get(record_id)
+        if result:
+            result["version"] = self._get_current_version(record_id)
+        return result  # type: ignore[return-value]
 
     def get(self, record_id: str) -> dict[str, Any] | None:
         """Fetch a single record by ID."""
@@ -188,6 +185,62 @@ class Storage:
             (record_id,),
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
+
+    def _get_current_version(self, record_id: str) -> int:
+        """Get the highest version number for a record."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT MAX(version) AS v FROM versions WHERE record_id = ?",
+            (record_id,),
+        ).fetchone()
+        return row["v"] if row and row["v"] else 0
+
+    def create_version(self, record_id: str, max_versions: int = 20) -> int:
+        """Create a version snapshot of the current record state.
+
+        Returns the new version number. If max_versions > 0, prunes
+        the oldest versions to keep only the most recent max_versions.
+        """
+        conn = self._get_conn()
+        record = self.get(record_id)
+        if not record:
+            raise ValueError(f"Record not found: {record_id}")
+
+        now = datetime.now(timezone.utc).isoformat()
+        current = self._get_current_version(record_id)
+        new_version = current + 1
+
+        conn.execute(
+            "INSERT OR REPLACE INTO versions (record_id, version, transcript, ai_results_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            (record_id, new_version, record["transcript"], record["ai_results_json"], now),
+        )
+        conn.commit()
+
+        if max_versions > 0:
+            self._prune_versions(record_id, max_versions)
+
+        return new_version
+
+    def _prune_versions(self, record_id: str, max_versions: int) -> None:
+        """Delete oldest versions, keeping only the most recent max_versions."""
+        conn = self._get_conn()
+        conn.execute(
+            """DELETE FROM versions WHERE record_id = ? AND version NOT IN (
+                SELECT version FROM versions WHERE record_id = ? ORDER BY version DESC LIMIT ?
+            )""",
+            (record_id, record_id, max_versions),
+        )
+        conn.commit()
+
+    def delete_version(self, record_id: str, version: int) -> bool:
+        """Delete a single version from a record's version history."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM versions WHERE record_id = ? AND version = ?",
+            (record_id, version),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def restore_version(self, record_id: str, version: int) -> dict[str, Any] | None:
         """Restore a record to a specific version (creates new version)."""
@@ -316,12 +369,17 @@ class Storage:
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         """Convert a sqlite3.Row to a plain dict, parsing JSON fields."""
         d = dict(row)
-        for json_field in ("segments_json", "ai_results_json", "tags_json"):
+        json_defaults = {
+            "segments_json": [],
+            "ai_results_json": {},
+            "tags_json": [],
+        }
+        for json_field, default in json_defaults.items():
             if json_field in d:
                 try:
                     d[json_field.replace("_json", "")] = json.loads(d[json_field])
                 except (json.JSONDecodeError, TypeError):
-                    d[json_field.replace("_json", "")] = []
+                    d[json_field.replace("_json", "")] = default
         return d
 
     def close(self) -> None:

@@ -3,7 +3,7 @@
  * VersionHistory - Version history sidebar/drawer.
  *
  * Lists all versions for a record, highlights the current version,
- * and provides a restore confirmation dialog.
+ * and provides restore and delete actions per version.
  * Uses useStorage composable for version API calls.
  */
 import { ref, onMounted, computed } from "vue";
@@ -18,10 +18,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   restored: [record: TranscriptRecord];
+  deleted: [];
 }>();
 
 const store = useAppStore();
-const { getVersions, restoreVersion } = useStorage();
+const { getVersions, restoreVersion, deleteVersion } = useStorage();
 
 const versions = ref<Version[]>([]);
 const isLoading = ref(false);
@@ -52,6 +53,15 @@ async function confirmRestore() {
   }
   isRestoring.value = false;
   confirmRestoreVersion.value = null;
+}
+
+async function handleDelete(version: number) {
+  const success = await deleteVersion(props.recordId, version);
+  if (success) {
+    store.showToast(`Version v${version} deleted`, "info");
+    await loadVersions();
+    emit("deleted");
+  }
 }
 
 function cancelRestore() {
@@ -86,7 +96,7 @@ onMounted(loadVersions);
 
     <!-- Empty -->
     <p v-else-if="sortedVersions.length === 0" class="text-sm text-base-content/40">
-      No version history yet. Edits will create versions automatically.
+      No version history yet. Click "Save Version" to create a snapshot.
     </p>
 
     <!-- Version list -->
@@ -94,10 +104,10 @@ onMounted(loadVersions);
       <div
         v-for="ver in sortedVersions"
         :key="ver.version"
-        class="flex items-center justify-between rounded px-2 py-1.5 text-sm"
+        class="flex items-start justify-between rounded px-2 py-1.5 text-sm"
         :class="ver.version === currentVersion ? 'bg-primary/10 border border-primary/30' : 'hover:bg-base-200'"
       >
-        <div>
+        <div class="min-w-0 flex-1">
           <span class="font-medium">
             v{{ ver.version }}
           </span>
@@ -107,15 +117,33 @@ onMounted(loadVersions);
           <div class="text-xs text-base-content/40">
             {{ formatDate(ver.created_at) }}
           </div>
+          <!-- Text preview for quick comparison -->
+          <div class="mt-1 text-xs text-base-content/30 truncate max-w-[200px]" :title="ver.transcript">
+            {{ ver.transcript ? ver.transcript.slice(0, 80) : '(empty)' }}{{ ver.transcript && ver.transcript.length > 80 ? '...' : '' }}
+          </div>
         </div>
-        <button
-          v-if="ver.version !== currentVersion"
-          class="btn btn-ghost btn-xs"
-          :disabled="isRestoring"
-          @click="handleRestore(ver.version)"
-        >
-          Restore
-        </button>
+        <div class="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            v-if="ver.version !== currentVersion"
+            class="btn btn-ghost btn-xs"
+            :disabled="isRestoring"
+            @click="handleRestore(ver.version)"
+          >
+            Restore
+          </button>
+          <button
+            class="btn btn-ghost btn-xs text-error"
+            title="Delete this version"
+            @click="handleDelete(ver.version)"
+          >
+            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 

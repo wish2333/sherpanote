@@ -50,8 +50,11 @@ export const useAppStore = defineStore("app", () => {
     api_key: null,
     base_url: null,
     temperature: 0.7,
-    max_tokens: 4096,
+    max_tokens: 8192,
   });
+
+  /* ---- Auto AI processing modes ---- */
+  const autoAiModes = ref<string[]>([]);
 
   /* ---- ASR config ---- */
   const asrConfig = ref<AsrConfig>({
@@ -62,6 +65,7 @@ export const useAppStore = defineStore("app", () => {
     active_streaming_model: "",
     active_offline_model: "",
     mirror_url: null,
+    auto_punctuate: false,
   });
 
   /* ---- toast notifications ---- */
@@ -92,6 +96,7 @@ export const useAppStore = defineStore("app", () => {
     isAiProcessing,
     aiConfig,
     asrConfig,
+    autoAiModes,
     toasts,
     showToast,
     activeSegmentIndex,

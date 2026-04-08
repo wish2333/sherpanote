@@ -107,6 +107,26 @@ export function useStorage() {
     return null;
   }
 
+  /** Create an explicit version snapshot for a record. */
+  async function saveVersion(recordId: string): Promise<number | null> {
+    const res = await call<{ version: number }>("save_version", recordId);
+    if (res.success && res.data) {
+      return res.data.version;
+    }
+    store.showToast(res.error ?? "Failed to save version", "error");
+    return null;
+  }
+
+  /** Delete a single version from a record's version history. */
+  async function deleteVersion(recordId: string, version: number): Promise<boolean> {
+    const res = await call<{ version: number }>("delete_version", recordId, version);
+    if (res.success) {
+      return true;
+    }
+    store.showToast(res.error ?? "Failed to delete version", "error");
+    return false;
+  }
+
   /** Export a record to the given format. Returns the file path. */
   async function exportRecord(
     recordId: string,
@@ -141,6 +161,8 @@ export function useStorage() {
     searchRecords,
     getVersions,
     restoreVersion,
+    saveVersion,
+    deleteVersion,
     exportRecord,
     importRecord,
   };

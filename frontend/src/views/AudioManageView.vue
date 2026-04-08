@@ -18,14 +18,6 @@ interface AudioFileInfo {
   linked_records: { id: string; title: string }[];
 }
 
-interface TranscriptRecord {
-  id: string;
-  title: string;
-  audio_path: string | null;
-  transcript: string;
-  segments: { text: string; start_time: number; end_time: number }[];
-}
-
 const store = useAppStore();
 const router = useRouter();
 const audioFiles = ref<AudioFileInfo[]>([]);
@@ -106,26 +98,17 @@ async function handleTranscribe(filePath: string) {
   transcribingPath.value = filePath;
   store.showToast("Starting transcription...", "info");
 
-  // Listen for completion event.
-  const offComplete = onEvent<{ segments: { text: string; start_time: number; end_time: number }[]; text: string; audio_path: string }>(
-    "transcribe_complete",
+  // Use import_and_transcribe which handles the full flow
+  // (transcribe + save record) on the backend thread.
+  // This ensures the record is saved even if the user navigates away.
+  const offComplete = onEvent<{ record_id: string; record: { id: string } }>(
+    "import_transcribe_complete",
     async (detail) => {
       offComplete();
       offError();
-      const fileName = filePath.split(/[/\\]/).pop() || "Imported";
-      const record = await call<TranscriptRecord>("save_record", {
-        title: fileName.replace(/\.[^.]+$/, ""),
-        transcript: detail.text ?? "",
-        segments: detail.segments ?? [],
-        audio_path: detail.audio_path ?? filePath,
-      });
-      if (record.success && record.data) {
-        store.showToast("Transcription complete", "success");
-        await loadAudioFiles();
-        router.push(`/editor/${record.data.id}`);
-      } else {
-        store.showToast("Failed to save record", "error");
-      }
+      store.showToast("Transcription complete", "success");
+      await loadAudioFiles();
+      router.push(`/editor/${detail.record_id}`);
       transcribingPath.value = null;
     },
   );
@@ -140,7 +123,7 @@ async function handleTranscribe(filePath: string) {
   // Store cleanup handles in case of unmount.
   cleanupFns.push(offComplete, offError);
 
-  const res = await call("transcribe_file", filePath);
+  const res = await call("import_and_transcribe", filePath);
   if (!res.success) {
     offComplete();
     offError();

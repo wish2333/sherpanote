@@ -64,12 +64,6 @@ function formatPath(path: string): string {
 
 <template>
   <div class="flex items-center gap-1">
-    <!-- Include AI toggle -->
-    <label class="label cursor-pointer gap-1" title="Include AI results in export">
-      <input v-model="includeAi" type="checkbox" class="checkbox checkbox-xs checkbox-primary" />
-      <span class="label-text text-xs text-base-content/60">AI</span>
-    </label>
-
     <!-- Export dropdown -->
     <div class="dropdown dropdown-end">
       <div tabindex="0" role="button" class="btn btn-outline btn-sm">
@@ -79,7 +73,15 @@ function formatPath(path: string): string {
           <path d="M6 9l6 6 6-6" />
         </svg>
       </div>
-      <ul tabindex="0" class="dropdown-content menu z-[1] w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-md">
+      <ul tabindex="0" class="dropdown-content menu z-[1] w-56 rounded-box border border-base-300 bg-base-100 p-2 shadow-md">
+        <!-- Include AI results toggle -->
+        <li class="px-1 pb-1 mb-1 border-b border-base-200">
+          <label class="label cursor-pointer gap-2 justify-start">
+            <input v-model="includeAi" type="checkbox" class="toggle toggle-primary toggle-xs" />
+            <span class="label-text text-sm">Include AI Results</span>
+          </label>
+        </li>
+        <!-- Format options -->
         <li v-for="fmt in formats" :key="fmt.key">
           <a :class="{ 'pointer-events-none opacity-50': isExporting }" @click="handleExport(fmt.key)">
             {{ fmt.label }}

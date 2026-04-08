@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,7 @@ class AsrConfig:
     active_streaming_model: str = ""
     active_offline_model: str = ""
     mirror_url: str | None = None
+    auto_punctuate: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class AiConfig:
     api_key: str | None = None
     base_url: str | None = None
     temperature: float = 0.7
-    max_tokens: int = 4096
+    max_tokens: int = 8192
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,8 @@ class AppConfig:
     asr: AsrConfig = AsrConfig()
     ai: AiConfig = AiConfig()
     max_versions: int = 20
+    auto_ai_modes: tuple[str, ...] = ()  # e.g. ("polish", "note")
+    max_tokens_mode: str = "auto"  # "auto" | "custom" | "default"
 
     @staticmethod
     def default() -> AppConfig:
@@ -77,6 +80,7 @@ class AppConfig:
                 "active_streaming_model": self.asr.active_streaming_model,
                 "active_offline_model": self.asr.active_offline_model,
                 "mirror_url": self.asr.mirror_url,
+                "auto_punctuate": self.asr.auto_punctuate,
             },
             "ai": {
                 "provider": self.ai.provider,
@@ -87,6 +91,8 @@ class AppConfig:
                 "max_tokens": self.ai.max_tokens,
             },
             "max_versions": self.max_versions,
+            "auto_ai_modes": list(self.auto_ai_modes),
+            "max_tokens_mode": self.max_tokens_mode,
         }
 
     @staticmethod
@@ -104,6 +110,7 @@ class AppConfig:
                 active_streaming_model=asr_d.get("active_streaming_model", ""),
                 active_offline_model=asr_d.get("active_offline_model", ""),
                 mirror_url=asr_d.get("mirror_url"),
+                auto_punctuate=asr_d.get("auto_punctuate", False),
             ),
             ai=AiConfig(
                 provider=ai_d.get("provider", "openai"),
@@ -114,6 +121,8 @@ class AppConfig:
                 max_tokens=ai_d.get("max_tokens", 4096),
             ),
             max_versions=data.get("max_versions", 20),
+            auto_ai_modes=tuple(data.get("auto_ai_modes", [])),
+            max_tokens_mode=data.get("max_tokens_mode", "auto"),
         )
 
 

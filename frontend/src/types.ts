@@ -34,6 +34,31 @@ export interface AiConfig {
   max_tokens: number;
 }
 
+export interface AiPreset {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  api_key: string | null;
+  base_url: string | null;
+  temperature: number;
+  max_tokens: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiProcessingPreset {
+  id: string;
+  name: string;
+  mode: string;
+  prompt: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AsrConfig {
   model_dir: string;
   language: string;
@@ -42,11 +67,19 @@ export interface AsrConfig {
   active_streaming_model: string;
   active_offline_model: string;
   mirror_url: string | null;
+  auto_punctuate: boolean;
 }
 
-export type AiMode = "polish" | "note" | "mindmap" | "brainstorm";
+export interface AppSettings {
+  ai: AiConfig;
+  asr: AsrConfig;
+  auto_ai_modes: string[];
+  max_tokens_mode: string;  // "auto" | "custom" | "default"
+}
 
-export type AiResults = Partial<Record<AiMode, string>>;
+export type AiMode = "polish" | "note" | "mindmap" | "brainstorm" | `preset_${string}`;
+
+export type AiResults = Record<string, string>;
 
 export type ExportFormat = "txt" | "md" | "srt" | "docx";
 
