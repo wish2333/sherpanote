@@ -1,0 +1,10 @@
+  Issue 4 (Diagnostic script): Created at scripts/test_sherpa.py. Usage:
+
+  # Scan models (just check sherpa-onnx is installed and find models)
+  uv run scripts/test_sherpa.py --script
+
+  # Transcribe an audio file (offline model)
+  uv run scripts/test_sherpa.py --script --file Q:\Git\GiteaManager\sherpanote\test\test.mp3
+
+  # Test streaming model (feeds silence, verifies no crash)
+  uv run scripts/test_sherpa.py --script --streaming

@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* ============================================================
+   SherpaNote Theme - Notion-inspired Design System
+   Based on DaisyUI 5 + Tailwind CSS 4
+   ============================================================ */
+
+/* --- Light Theme --- */
+@plugin "daisyui/theme" {
+  name: "sherpanote-light";
+  default: true;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f6f5f4;
+  --color-base-300: #e8e7e6;
+  --color-base-content: rgba(0, 0, 0, 0.95);
+
+  --color-primary: #0075de;
+  --color-primary-content: #ffffff;
+
+  --color-secondary: #213183;
+  --color-secondary-content: #ffffff;
+
+  --color-accent: #097fe8;
+  --color-accent-content: #ffffff;
+
+  --color-neutral: #31302e;
+  --color-neutral-content: #ffffff;
+
+  --color-info: #097fe8;
+  --color-info-content: #ffffff;
+
+  --color-success: #2a9d99;
+  --color-success-content: #ffffff;
+
+  --color-warning: #dd5b00;
+  --color-warning-content: #ffffff;
+
+  --color-error: #e53e3e;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 9999px;
+  --radius-field: 0.25rem;
+  --radius-box: 0.75rem;
+
+  --depth: 1;
+}
+
+/* --- Dark Theme --- */
+@plugin "daisyui/theme" {
+  name: "sherpanote-dark";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #191919;
+  --color-base-200: #1e1e1e;
+  --color-base-300: #2a2a2a;
+  --color-base-content: rgba(255, 255, 255, 0.92);
+
+  --color-primary: #4da3f0;
+  --color-primary-content: #191919;
+
+  --color-secondary: #6878c8;
+  --color-secondary-content: #ffffff;
+
+  --color-accent: #5aacf5;
+  --color-accent-content: #191919;
+
+  --color-neutral: #d4d3d1;
+  --color-neutral-content: #191919;
+
+  --color-info: #5aacf5;
+  --color-info-content: #191919;
+
+  --color-success: #3dbdb9;
+  --color-success-content: #191919;
+
+  --color-warning: #f07020;
+  --color-warning-content: #191919;
+
+  --color-error: #f56565;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 9999px;
+  --radius-field: 0.25rem;
+  --radius-box: 0.75rem;
+
+  --depth: 1;
+}
+
+/* --- NotionInter Font --- */
+@font-face {
+  font-family: "NotionInter";
+  src: local("Inter"), local("Inter-Regular");
+}
+
+body {
+  font-family: "NotionInter", "Inter", -apple-system, system-ui, "Segoe UI",
+    Helvetica, "Apple Color Emoji", Arial, "Segoe UI Emoji", "Segoe UI Symbol";
+}
