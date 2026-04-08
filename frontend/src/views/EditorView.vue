@@ -7,8 +7,9 @@
  *
  * Uses AiProcessor, ExportMenu, VersionHistory components.
  */
-import { ref, onMounted, watch, computed } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, computed } from "vue";
 import { useRouter, useRoute } from "vue-router";
+import { call, onEvent } from "../bridge";
 import { useStorage } from "../composables/useStorage";
 import { useAppStore } from "../stores/appStore";
 import AiProcessor from "../components/AiProcessor.vue";
@@ -34,7 +35,50 @@ const audioRef = ref<HTMLAudioElement | null>(null);
 const isPlaying = ref(false);
 const audioCurrentTime = ref(0);
 const audioDuration = ref(0);
+const audioDataUrl = ref("");
+const audioVolume = ref(0.8);
+const isMuted = ref(false);
+const showSegments = ref(true);
 const showVersionHistory = ref(false);
+
+// Re-transcribe
+const isRetranscribing = ref(false);
+
+async function handleRetranscribe() {
+  if (!record.value || isRetranscribing.value) return;
+  isRetranscribing.value = true;
+  store.showToast("Starting recognition...", "info");
+  const res = await call("retranscribe_record", record.value.id);
+  if (!res.success) {
+    store.showToast(res.error ?? "Recognition failed", "error");
+    isRetranscribing.value = false;
+  }
+  // Completion handled by event listener below
+}
+
+// Copy transcript to clipboard
+async function copyTranscript() {
+  const text = editorText.value;
+  if (!text) {
+    store.showToast("Nothing to copy", "warning");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    store.showToast("Copied to clipboard", "success");
+  } catch {
+    // Fallback for older browsers / restricted contexts
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+    store.showToast("Copied to clipboard", "success");
+  }
+}
 
 // Category & tags
 const availableCategories = ["", "Course", "Meeting", "Interview", "Lecture", "Personal"];
@@ -76,8 +120,25 @@ async function loadRecord() {
   if (data) {
     record.value = data;
     editorText.value = data.transcript || "";
+    // Load audio as base64 data URL for playback in pywebview.
+    if (data.audio_path) {
+      await loadAudioDataUrl(data.audio_path);
+    }
   }
   isLoading.value = false;
+}
+
+async function loadAudioDataUrl(audioPath: string) {
+  try {
+    const res = await call<{ base64: string; mime: string }>("get_audio_base64", audioPath);
+    if (res.success && res.data) {
+      audioDataUrl.value = `data:${res.data.mime};base64,${res.data.base64}`;
+    } else {
+      audioDataUrl.value = "";
+    }
+  } catch {
+    audioDataUrl.value = "";
+  }
 }
 
 watch(editorText, () => {
@@ -139,6 +200,22 @@ function togglePlayback() {
   isPlaying.value = !isPlaying.value;
 }
 
+function toggleMute() {
+  if (!audioRef.value) return;
+  isMuted.value = !isMuted.value;
+  audioRef.value.muted = isMuted.value;
+}
+
+function onVolumeChange(value: number) {
+  audioVolume.value = value;
+  if (!audioRef.value) return;
+  audioRef.value.volume = value;
+  if (value > 0 && isMuted.value) {
+    isMuted.value = false;
+    audioRef.value.muted = false;
+  }
+}
+
 function seekToSegment(segment: Segment) {
   if (!audioRef.value) return;
   audioRef.value.currentTime = segment.start_time;
@@ -165,10 +242,32 @@ function onVersionRestored(updated: TranscriptRecord) {
 }
 
 function hasAudio(): boolean {
-  return !!record.value?.audio_path;
+  return !!audioDataUrl.value;
 }
 
-onMounted(loadRecord);
+let offRetranscribe: (() => void) | null = null;
+
+onMounted(() => {
+  loadRecord();
+  offRetranscribe = onEvent<{
+    record_id: string;
+    record: TranscriptRecord;
+  }>("retranscribe_complete", ({ record_id, record: updatedRecord }) => {
+    if (record.value && record.value.id === record_id) {
+      record.value = updatedRecord;
+      editorText.value = updatedRecord.transcript;
+      isRetranscribing.value = false;
+      store.showToast("Recognition complete", "success");
+    }
+  });
+});
+
+onBeforeUnmount(() => {
+  if (offRetranscribe) {
+    offRetranscribe();
+    offRetranscribe = null;
+  }
+});
 </script>
 
 <template>
@@ -190,6 +289,24 @@ onMounted(loadRecord);
         />
       </div>
       <div class="flex items-center gap-2">
+        <!-- Re-transcribe (only for app-recorded audio) -->
+        <button
+          v-if="record?.can_retranscribe"
+          class="btn btn-ghost btn-sm"
+          :class="{ 'btn-disabled loading': isRetranscribing }"
+          :disabled="isRetranscribing"
+          title="Re-transcribe audio"
+          @click="handleRetranscribe"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+            <path d="M19 10v2a7 7 0 01-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+          {{ isRetranscribing ? "Transcribing..." : "Re-transcribe" }}
+        </button>
+
         <!-- Save status -->
         <span
           v-if="saveStatus !== 'idle'"
@@ -294,9 +411,37 @@ onMounted(loadRecord);
           <span class="text-xs font-mono text-base-content/60 min-w-[40px]">
             {{ formatAudioTime(audioDuration) }}
           </span>
+          <!-- Volume control -->
+          <div class="flex items-center gap-1 ml-1">
+            <button class="btn btn-ghost btn-xs btn-circle" @click="toggleMute">
+              <svg v-if="isMuted || audioVolume === 0" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+              <svg v-else-if="audioVolume < 0.5" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 010 7.07" />
+              </svg>
+              <svg v-else class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 010 7.07" />
+                <path d="M19.07 4.93a10 10 0 010 14.14" />
+              </svg>
+            </button>
+            <input
+              type="range"
+              class="range range-primary range-xs w-16"
+              min="0"
+              max="1"
+              step="0.05"
+              :value="isMuted ? 0 : audioVolume"
+              @input="onVolumeChange(Number(($event.target as HTMLInputElement).value))"
+            />
+          </div>
           <audio
             ref="audioRef"
-            :src="`file://${record.audio_path}`"
+            :src="audioDataUrl"
             preload="metadata"
             @timeupdate="onTimeUpdate"
             @loadedmetadata="onLoadedMetadata"
@@ -308,34 +453,67 @@ onMounted(loadRecord);
         <div class="rounded-lg border border-base-300 bg-base-100 p-4">
           <div class="mb-2 flex items-center justify-between">
             <h2 class="text-sm font-semibold text-base-content/60">Transcript</h2>
-            <span class="text-xs text-base-content/40">
-              {{ editorText.length }} chars
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-base-content/40">
+                {{ editorText.length }} chars
+              </span>
+              <button
+                class="btn btn-ghost btn-xs"
+                title="Copy transcript"
+                @click="copyTranscript"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+              </button>
+            </div>
           </div>
 
-          <!-- Segments view (with audio sync) or plain textarea -->
-          <div v-if="record.segments && record.segments.length > 0 && hasAudio()" class="space-y-2 max-h-[60vh] overflow-y-auto">
-            <p
-              v-for="seg in record.segments"
-              :key="seg.index"
-              class="cursor-pointer rounded px-2 py-1 text-base leading-relaxed transition-colors"
-              :class="store.activeSegmentIndex === seg.index ? 'bg-primary/15 text-primary' : 'hover:bg-base-200 text-base-content'"
-              @click="seekToSegment(seg)"
+          <!-- Segments view (with audio sync, collapsible) -->
+          <div
+            v-if="record.segments && record.segments.length > 0 && hasAudio()"
+            class="mb-4 rounded-lg border border-base-200 bg-base-100 overflow-hidden"
+          >
+            <button
+              class="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-200 transition-colors"
+              @click="showSegments = !showSegments"
             >
-              <span class="text-xs text-base-content/40 mr-2">
-                {{ formatAudioTime(seg.start_time) }}
-              </span>
-              <span v-if="seg.speaker" class="text-xs text-secondary mr-2">
-                {{ seg.speaker }}
-              </span>
-              {{ seg.text }}
-            </p>
+              <span>Timestamped Segments</span>
+              <svg
+                class="h-4 w-4 transition-transform"
+                :class="{ 'rotate-180': showSegments }"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <div v-if="showSegments" class="max-h-[40vh] overflow-y-auto px-2 pb-2 space-y-1">
+              <p
+                v-for="seg in record.segments"
+                :key="seg.index"
+                class="cursor-pointer rounded px-2 py-1 text-sm leading-relaxed transition-colors"
+                :class="store.activeSegmentIndex === seg.index ? 'bg-primary/15 text-primary' : 'hover:bg-base-200 text-base-content'"
+                @click="seekToSegment(seg)"
+              >
+                <span class="text-xs text-base-content/40 mr-2">
+                  {{ formatAudioTime(seg.start_time) }}
+                </span>
+                <span v-if="seg.speaker" class="text-xs text-secondary mr-2">
+                  {{ seg.speaker }}
+                </span>
+                {{ seg.text }}
+              </p>
+            </div>
           </div>
 
+          <!-- Editable transcript textarea (always visible) -->
           <textarea
-            v-else
             v-model="editorText"
-            class="textarea textarea-ghost w-full min-h-[60vh] text-base leading-relaxed resize-none"
+            class="textarea textarea-ghost w-full min-h-[40vh] text-base leading-relaxed resize-none"
             placeholder="Transcript will appear here..."
           ></textarea>
         </div>
@@ -347,7 +525,7 @@ onMounted(loadRecord);
         <VersionHistory
           v-if="showVersionHistory && record"
           :record-id="record.id"
-          :current-version="record.version"
+          :current-version="record.version ?? 0"
           @restored="onVersionRestored"
         />
 

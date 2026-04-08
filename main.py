@@ -7,9 +7,12 @@ Defines SherpaNoteAPI which bridges the Python backend
 
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import threading
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from pywebvue import App, Bridge, expose
@@ -136,7 +139,6 @@ class SherpaNoteAPI(Bridge):
         threading.Thread(target=_work, daemon=True).start()
         return {"success": True, "data": {"language": language, "status": "loading"}}
 
-    @expose
     @expose
     def start_streaming(self) -> dict:
         """Start a streaming recognition session.
@@ -306,7 +308,22 @@ class SherpaNoteAPI(Bridge):
     def save_record(self, data: dict) -> dict:
         """Create or update a record."""
         record = self._storage.save(data)
+        record = self._annotate_record(record)
         return {"success": True, "data": record}
+
+    def _annotate_record(self, record: dict) -> dict:
+        """Add computed fields to a record for the frontend."""
+        audio_path = record.get("audio_path", "")
+        if audio_path:
+            try:
+                resolved = str(Path(audio_path).resolve())
+                audio_dir = str(Path(self._config.data_dir).resolve() / "audio")
+                record["can_retranscribe"] = resolved.startswith(audio_dir)
+            except (OSError, ValueError):
+                record["can_retranscribe"] = False
+        else:
+            record["can_retranscribe"] = False
+        return record
 
     @expose
     def get_record(self, record_id: str) -> dict:
@@ -314,12 +331,14 @@ class SherpaNoteAPI(Bridge):
         record = self._storage.get(record_id)
         if record is None:
             return {"success": False, "error": f"Record not found: {record_id}"}
+        record = self._annotate_record(record)
         return {"success": True, "data": record}
 
     @expose
     def list_records(self, filter: dict = None) -> dict:
         """List records with optional filtering."""
         records = self._storage.list(filter)
+        records = [self._annotate_record(r) for r in records]
         return {"success": True, "data": records}
 
     @expose
@@ -335,35 +354,75 @@ class SherpaNoteAPI(Bridge):
         return {"success": True, "data": records}
 
     @expose
+    def get_audio_base64(self, file_path: str) -> dict:
+        """Read an audio file and return base64-encoded content with MIME type."""
+        p = Path(file_path).resolve()
+        allowed_base = Path(self._config.data_dir).resolve()
+        if not str(p).startswith(str(allowed_base)):
+            return {"success": False, "error": "Access denied: path outside data directory"}
+        if not p.exists():
+            return {"success": False, "error": f"Audio file not found: {file_path}"}
+
+        # Guard against excessively large files (base64 adds ~33% overhead).
+        max_size = 100 * 1024 * 1024  # 100 MB
+        if p.stat().st_size > max_size:
+            return {"success": False, "error": "Audio file too large for browser playback"}
+
+        import mimetypes
+        mime, _ = mimetypes.guess_type(str(p))
+        if mime is None:
+            mime = "audio/wav"
+
+        try:
+            import base64
+            data = p.read_bytes()
+            b64 = base64.b64encode(data).decode("ascii")
+            return {"success": True, "data": {"base64": b64, "mime": mime}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
     def retranscribe_record(self, record_id: str) -> dict:
         """Re-transcribe the audio file associated with a record.
 
         Runs in a background thread. Progress is emitted via
         'transcribe_progress' events; completion via 'retranscribe_complete'.
         """
-        from pathlib import Path as P
+        logger.info("retranscribe_record: record_id=%s", record_id)
 
         record = self._storage.get(record_id)
         if record is None:
+            logger.warning("retranscribe_record: record not found: %s", record_id)
             return {"success": False, "error": f"Record not found: {record_id}"}
 
         audio_path = record.get("audio_path")
         if not audio_path:
+            logger.warning("retranscribe_record: no audio_path for record %s", record_id)
             return {"success": False, "error": "This record has no associated audio file"}
 
-        if not P(audio_path).exists():
+        if not Path(audio_path).exists():
+            logger.warning("retranscribe_record: audio file not found: %s", audio_path)
             return {"success": False, "error": f"Audio file not found: {audio_path}"}
 
         if self._asr is None:
             self._asr = SherpaASR(self._make_asr_config())
+
+        logger.info("retranscribe_record: starting transcription of %s", audio_path)
 
         def on_progress(percent: int) -> None:
             self._emit("transcribe_progress", {"percent": percent})
 
         def _work() -> None:
             try:
+                logger.info("retranscribe_record: creating offline recognizer...")
+                # Ensure offline recognizer is created on main thread
+                if self._asr._offline_recognizer is None:
+                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+
+                logger.info("retranscribe_record: transcribing file %s", audio_path)
                 segments = self._asr.transcribe_file(audio_path, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
+                logger.info("retranscribe_record: transcription done, %d segments, saving...", len(segments))
                 updated = self._storage.save({
                     "id": record_id,
                     "transcript": full_text,
@@ -373,9 +432,12 @@ class SherpaNoteAPI(Bridge):
                     "record_id": record_id,
                     "record": updated,
                 })
+                logger.info("retranscribe_record: complete for record %s", record_id)
             except FileNotFoundError as e:
+                logger.error("retranscribe_record: file not found: %s", e)
                 self._emit("transcribe_error", {"error": str(e)})
             except Exception as e:
+                logger.error("retranscribe_record: failed: %s", e, exc_info=True)
                 self._emit("transcribe_error", {"error": f"Transcription failed: {e}"})
 
         threading.Thread(target=_work, daemon=True).start()
@@ -440,6 +502,98 @@ class SherpaNoteAPI(Bridge):
             return {"success": True, "data": record}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ---- Import & Transcribe ----
+
+    def _copy_file_to_audio_dir(self, src_path: str) -> str:
+        """Copy a file into data/audio/ with a safe timestamped filename.
+
+        Returns the destination path as a string.
+        Appends a numeric suffix if a file with the same name exists.
+        """
+        audio_dir = Path(self._config.data_dir) / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        src = Path(src_path)
+        ext = src.suffix.lower()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_name = f"import_{timestamp}"
+
+        dest = audio_dir / f"{base_name}{ext}"
+        if dest.exists():
+            counter = 1
+            while (audio_dir / f"{base_name}_{counter}{ext}").exists():
+                counter += 1
+            dest = audio_dir / f"{base_name}_{counter}{ext}"
+
+        shutil.copy2(str(src), str(dest))
+        logger.info("Copied %s -> %s", src_path, dest)
+        return str(dest)
+
+    @expose
+    def import_and_transcribe(self, file_path: str) -> dict:
+        """Copy an audio file into data/audio/, then transcribe it.
+
+        Unlike transcribe_file, this manages the audio file inside the
+        app's data directory so the resulting record supports re-transcription.
+
+        Progress is emitted via 'transcribe_progress'; completion via
+        'import_transcribe_complete' with {record_id, record, audio_path}.
+        """
+        logger.info("import_and_transcribe called for: %s", file_path)
+
+        src = Path(file_path)
+        if not src.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        audio_exts = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
+        if src.suffix.lower() not in audio_exts:
+            return {"success": False, "error": f"Unsupported audio format: {src.suffix}"}
+
+        # Copy file into managed directory.
+        try:
+            dest_path = self._copy_file_to_audio_dir(file_path)
+        except Exception as exc:
+            logger.error("Failed to copy file: %s", exc, exc_info=True)
+            return {"success": False, "error": f"Failed to copy file: {exc}"}
+
+        title = src.stem
+
+        if self._asr is None:
+            self._asr = SherpaASR(self._make_asr_config())
+
+        def on_progress(percent: int) -> None:
+            self._emit("transcribe_progress", {"percent": percent})
+
+        def _work(dest: str, rec_title: str) -> None:
+            try:
+                if self._asr._offline_recognizer is None:
+                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+
+                logger.info("import_and_transcribe: transcribing %s", dest)
+                segments = self._asr.transcribe_file(dest, on_progress=on_progress)
+                full_text = " ".join(s["text"] for s in segments)
+                logger.info("import_and_transcribe: saving record")
+                record = self._storage.save({
+                    "title": rec_title,
+                    "transcript": full_text,
+                    "segments": segments,
+                    "audio_path": dest,
+                    "duration_seconds": 0,
+                })
+                record = self._annotate_record(record)
+                self._emit("import_transcribe_complete", {
+                    "record_id": record["id"],
+                    "record": record,
+                    "audio_path": dest,
+                })
+                logger.info("import_and_transcribe: complete, record_id=%s", record["id"])
+            except Exception as exc:
+                logger.error("import_and_transcribe: failed: %s", exc, exc_info=True)
+                self._emit("transcribe_error", {"error": f"Transcription failed: {exc}"})
+
+        threading.Thread(target=_work, args=(dest_path, title), daemon=True).start()
+        return {"success": True, "data": {"status": "importing", "audio_path": dest_path}}
 
     # ---- Model Management ----
 
@@ -577,6 +731,90 @@ class SherpaNoteAPI(Bridge):
             return {"success": False, "error": str(e)}
 
     # ---- Config ----
+
+    @expose
+    def list_audio_files(self) -> dict:
+        """List all audio files in the data/audio directory.
+
+        Returns each file with its size and linked records.
+        """
+        audio_dir = Path(self._config.data_dir) / "audio"
+        if not audio_dir.is_dir():
+            return {"success": True, "data": []}
+
+        # Build a map from audio_path to records that reference it.
+        records = self._storage.list()
+        path_to_records: dict[str, list[dict[str, str]]] = {}
+        for rec in records:
+            audio_path = rec.get("audio_path", "")
+            if audio_path:
+                # Normalize path for cross-platform matching.
+                normalized = str(Path(audio_path))
+                path_to_records.setdefault(normalized, []).append({
+                    "id": rec["id"],
+                    "title": rec.get("title", ""),
+                })
+
+        files = []
+        for entry in sorted(audio_dir.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True):
+            if not entry.is_file():
+                continue
+            ext = entry.suffix.lower()
+            if ext not in (".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"):
+                continue
+
+            size_mb = entry.stat().st_size / (1024 * 1024)
+            normalized = str(entry)
+            linked = path_to_records.get(normalized, [])
+
+            files.append({
+                "file_path": str(entry),
+                "file_name": entry.name,
+                "size_mb": round(size_mb, 2),
+                "linked_records": linked,
+            })
+
+        return {"success": True, "data": files}
+
+    @expose
+    def delete_audio_file(self, file_path: str) -> dict:
+        """Delete an audio file from disk and clear references in linked records."""
+        p = Path(file_path).resolve()
+        allowed_base = Path(self._config.data_dir).resolve()
+        if not str(p).startswith(str(allowed_base)):
+            return {"success": False, "error": "Access denied: path outside data directory"}
+        if not p.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+        try:
+            p.unlink()
+            # Clear audio_path from records that reference this file.
+            # Must pass the full record data to avoid overwriting other fields.
+            normalized = str(p)
+            for rec in self._storage.list():
+                rec_path = str(Path(rec.get("audio_path", "")).resolve())
+                if rec_path == normalized:
+                    updated = dict(rec)
+                    updated["audio_path"] = None
+                    self._storage.save(updated)
+            return {"success": True, "data": {"file_path": str(p)}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def open_audio_folder(self) -> dict:
+        """Open the audio files directory in the system file explorer."""
+        audio_dir = str(Path(self._config.data_dir) / "audio")
+        Path(audio_dir).mkdir(parents=True, exist_ok=True)
+        try:
+            if sys.platform == "win32":
+                os.startfile(audio_dir)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", audio_dir])
+            else:
+                subprocess.Popen(["xdg-open", audio_dir])
+            return {"success": True, "data": {"path": audio_dir}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @expose
     def get_config(self) -> dict:

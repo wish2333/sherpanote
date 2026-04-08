@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
+import { useAppStore } from "../stores/appStore";
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -24,7 +25,23 @@ const router = createRouter({
       name: "settings",
       component: () => import("../views/SettingsView.vue"),
     },
+    {
+      path: "/audio",
+      name: "audio",
+      component: () => import("../views/AudioManageView.vue"),
+    },
   ],
+});
+
+// Block navigation while recording is active to prevent state loss.
+router.beforeEach((_to, _from, next) => {
+  const store = useAppStore();
+  if (store.isRecording) {
+    store.showToast("Cannot navigate while recording is in progress", "warning");
+    next(false);
+  } else {
+    next();
+  }
 });
 
 export default router;

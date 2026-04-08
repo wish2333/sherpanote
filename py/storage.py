@@ -82,7 +82,11 @@ class Storage:
     # ---- Record CRUD ----
 
     def save(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Insert or update a record. Auto-generates id and timestamps."""
+        """Insert or update a record. Auto-generates id and timestamps.
+
+        For updates, provided fields are merged with existing record data
+        to avoid unintended overwrites of unspecified fields.
+        """
         conn = self._get_conn()
         now = datetime.now(timezone.utc).isoformat()
 
@@ -99,6 +103,10 @@ class Storage:
                     (record_id, version, existing["transcript"], existing["ai_results_json"], now),
                 )
                 data["version"] = version
+                # Merge: use existing values as defaults for any field not provided.
+                merged = dict(existing)
+                merged.update(data)
+                data = merged
 
         segments_json = json.dumps(data.get("segments", []), ensure_ascii=False)
         ai_json = json.dumps(data.get("ai_results", {}), ensure_ascii=False)
@@ -318,5 +326,9 @@ class Storage:
 
     def close(self) -> None:
         if self._conn:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
             self._conn.close()
             self._conn = None

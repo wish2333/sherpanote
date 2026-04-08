@@ -500,7 +500,13 @@ class SherpaASR:
         return segments
 
     def _create_offline_recognizer(self, sherpa_onnx: Any, model_dir: Path) -> Any:
-        """Create an OfflineRecognizer from the model directory."""
+        """Create an OfflineRecognizer from the model directory.
+
+        Model detection priority:
+        1. Paraformer (model.int8.onnx or model.onnx, but not SenseVoice)
+        2. SenseVoice (model.onnx when model dir name contains "sense-voice")
+        3. Whisper (encoder.onnx + decoder.onnx)
+        """
         tokens = model_dir / "tokens.txt"
         if not tokens.exists():
             raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
@@ -510,28 +516,34 @@ class SherpaASR:
         if self._config.use_gpu:
             provider = "cuda"
 
-        # Try SenseVoice model (best multilingual, supports timestamps).
+        # Check for SenseVoice by directory name.
+        dir_name = model_dir.name.lower()
+        is_sense_voice = "sense-voice" in dir_name or "sensevoice" in dir_name
+
+        # Try Paraformer model (model.int8.onnx takes priority).
+        paraformer_model = model_dir / "model.int8.onnx"
+        if not paraformer_model.exists():
+            # model.onnx could be Paraformer or SenseVoice -- use dir name to decide.
+            if not is_sense_voice:
+                paraformer_model = model_dir / "model.onnx"
+        if paraformer_model.exists():
+            logger.info("Using Paraformer offline model (dir: %s)", model_dir.name)
+            return sherpa_onnx.OfflineRecognizer.from_paraformer(
+                tokens=str(tokens),
+                paraformer=str(paraformer_model),
+                num_threads=num_threads,
+                provider=provider,
+            )
+
+        # Try SenseVoice model (only if directory name indicates SenseVoice).
         sense_voice_model = model_dir / "model.onnx"
-        if sense_voice_model.exists():
+        if is_sense_voice and sense_voice_model.exists():
             logger.info("Using SenseVoice offline model")
             return sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(sense_voice_model),
                 tokens=str(tokens),
                 num_threads=num_threads,
                 use_itn=True,
-                provider=provider,
-            )
-
-        # Try Paraformer model.
-        paraformer_model = model_dir / "model.int8.onnx"
-        if not paraformer_model.exists():
-            paraformer_model = model_dir / "model.onnx"
-        if paraformer_model.exists():
-            logger.info("Using Paraformer offline model")
-            return sherpa_onnx.OfflineRecognizer.from_paraformer(
-                tokens=str(tokens),
-                paraformer=str(paraformer_model),
-                num_threads=num_threads,
                 provider=provider,
             )
 

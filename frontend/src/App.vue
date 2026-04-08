@@ -1,17 +1,21 @@
 <script setup lang="ts">
 /**
- * App.vue - Root layout with navbar and toast notifications.
+ * App.vue - Root layout with navbar, transcription progress bar, and toast notifications.
  *
  * Uses ThemeToggle component and renders toast container.
  */
-import { onMounted } from "vue";
+import { onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
+import { onEvent } from "./bridge";
 import { useAppStore } from "./stores/appStore";
 import { waitForPyWebView } from "./bridge";
 import ThemeToggle from "./components/ThemeToggle.vue";
 
 const store = useAppStore();
 const router = useRouter();
+
+// Global transcription progress tracking.
+const cleanupFns: (() => void)[] = [];
 
 onMounted(async () => {
   store.applyTheme();
@@ -22,6 +26,39 @@ onMounted(async () => {
   } catch {
     store.ready = false;
   }
+
+  // Listen for global transcription events so progress bar
+  // is visible even when user navigates away from the transcribing page.
+  const offProgress = onEvent<{ percent: number }>(
+    "transcribe_progress",
+    ({ percent }) => {
+      store.transcribeProgress = percent;
+      store.isTranscribing = true;
+    },
+  );
+  const offComplete = onEvent("transcribe_complete", () => {
+    store.isTranscribing = false;
+    store.transcribeProgress = 0;
+  });
+  const offRetranscribe = onEvent("retranscribe_complete", () => {
+    store.isTranscribing = false;
+    store.transcribeProgress = 0;
+  });
+  const offImport = onEvent("import_transcribe_complete", () => {
+    store.isTranscribing = false;
+    store.transcribeProgress = 0;
+  });
+  const offError = onEvent("transcribe_error", () => {
+    store.isTranscribing = false;
+    store.transcribeProgress = 0;
+  });
+
+  cleanupFns.push(offProgress, offComplete, offRetranscribe, offImport, offError);
+});
+
+onBeforeUnmount(() => {
+  cleanupFns.forEach((fn) => fn());
+  cleanupFns.length = 0;
 });
 </script>
 
@@ -50,11 +87,25 @@ onMounted(async () => {
             <span class="text-sm">Record</span>
           </a>
         </li>
+        <li>
+          <a
+            :class="{ 'bg-base-200': $route.path === '/audio' }"
+            @click="router.push('/audio')"
+          >
+            <span class="text-sm">Audio Files</span>
+          </a>
+        </li>
       </ul>
     </div>
 
     <!-- Right: status + actions -->
     <div class="navbar-end gap-2">
+      <!-- Transcription progress indicator -->
+      <div v-if="store.isTranscribing" class="flex items-center gap-2">
+        <span class="loading loading-spinner loading-xs text-primary"></span>
+        <span class="text-xs text-base-content/60">{{ store.transcribeProgress }}%</span>
+      </div>
+
       <!-- Bridge status indicator -->
       <span
         class="badge badge-sm"
@@ -74,6 +125,14 @@ onMounted(async () => {
         </svg>
       </button>
     </div>
+  </div>
+
+  <!-- Global transcription progress bar -->
+  <div v-if="store.isTranscribing" class="w-full bg-base-200">
+    <div
+      class="h-1 bg-primary transition-all duration-300 ease-out"
+      :style="{ width: `${Math.min(store.transcribeProgress, 100)}%` }"
+    ></div>
   </div>
 
   <!-- Page content -->

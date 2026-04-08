@@ -179,6 +179,7 @@ bun.lock
 runCC-GLM.bat
 runCC-OR.bat
 .claude/
+AGENT.md
 
 # Build
 frontend_dist/

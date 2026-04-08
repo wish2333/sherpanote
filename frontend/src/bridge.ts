@@ -1,5 +1,5 @@
 /** Core bridge functions for communicating with the Python backend. */
-import type { ModelEntry, InstalledModel } from "../types";
+import type { ModelEntry, InstalledModel } from "./types";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;

@@ -5,9 +5,8 @@
  * Uses SearchBar, RecordCard, and useStorage composable.
  * Supports drag-and-drop audio file import.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { call, onEvent } from "../bridge";
 import { useStorage } from "../composables/useStorage";
 import { useTranscript } from "../composables/useTranscript";
 import { useDragDrop } from "../composables/useDragDrop";
@@ -20,7 +19,7 @@ const router = useRouter();
 const route = useRoute();
 const store = useAppStore();
 const { isLoading, loadRecords, deleteRecord, importRecord } = useStorage();
-const { transcribeFile, saveAsRecord, isTranscribingFile } = useTranscript();
+const { transcribeFile, saveAsRecord } = useTranscript();
 
 const records = ref<TranscriptRecord[]>([]);
 const deletingId = ref<string | null>(null);
@@ -130,53 +129,13 @@ async function handleFileImport(filePath: string) {
   }
 }
 
-async function handleRecognize(record: TranscriptRecord) {
-  if (isTranscribingFile.value) {
-    store.showToast("A transcription is already in progress", "warning");
-    return;
-  }
-  store.showToast("Starting recognition...", "info");
-  const res = await call("retranscribe_record", record.id);
-  if (!res.success) {
-    store.showToast(res.error ?? "Recognition failed", "error");
-    return;
-  }
-  // The backend runs transcription in a background thread.
-  // Listen for completion via event.
-}
-
-// Listen for retranscribe_complete events from the backend.
-let offRetranscribe: (() => void) | null = null;
-
 onMounted(async () => {
-  offRetranscribe = onEvent<{
-    record_id: string;
-    record: TranscriptRecord;
-  }>("retranscribe_complete", ({ record_id, record }) => {
-    const idx = records.value.findIndex((r) => r.id === record_id);
-    if (idx >= 0) {
-      records.value = [
-        ...records.value.slice(0, idx),
-        record,
-        ...records.value.slice(idx + 1),
-      ];
-    }
-    store.showToast("Recognition complete", "success");
-  });
-
   const results = await loadRecords();
   records.value = results;
 
   const fileQuery = route.query.file as string | undefined;
   if (fileQuery) {
     await handleFileImport(fileQuery);
-  }
-});
-
-onBeforeUnmount(() => {
-  if (offRetranscribe) {
-    offRetranscribe();
-    offRetranscribe = null;
   }
 });
 </script>
@@ -246,7 +205,6 @@ onBeforeUnmount(() => {
         :record="record"
         @click="openRecord(record.id)"
         @delete="handleDelete(record.id)"
-        @recognize="handleRecognize(record)"
       />
     </div>
 

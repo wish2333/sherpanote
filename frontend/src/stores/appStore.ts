@@ -40,6 +40,7 @@ export const useAppStore = defineStore("app", () => {
   /* ---- processing states ---- */
   const isRecording = ref(false);
   const isTranscribing = ref(false);
+  const transcribeProgress = ref(0);
   const isAiProcessing = ref(false);
 
   /* ---- AI config ---- */
@@ -87,6 +88,7 @@ export const useAppStore = defineStore("app", () => {
     currentRecord,
     isRecording,
     isTranscribing,
+    transcribeProgress,
     isAiProcessing,
     aiConfig,
     asrConfig,
