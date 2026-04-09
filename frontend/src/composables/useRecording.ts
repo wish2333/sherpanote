@@ -35,12 +35,11 @@ export function useRecording() {
   // Cleanup handle for pending streaming_ready / streaming_error listeners.
   let _cancelStreamingWait: (() => void) | null = null;
 
-  /** Detect ScriptProcessorNode and getUserMedia support. */
+  /** Detect ScriptProcessorNode support. */
   function checkSupport(): boolean {
     const supported =
       typeof AudioContext !== "undefined" &&
-      typeof AudioContext.prototype.createScriptProcessor === "function" &&
-      !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+      typeof AudioContext.prototype.createScriptProcessor === "function";
     isSupported.value = supported;
     return supported;
   }
