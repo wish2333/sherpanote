@@ -35,10 +35,12 @@ export function useRecording() {
   // Cleanup handle for pending streaming_ready / streaming_error listeners.
   let _cancelStreamingWait: (() => void) | null = null;
 
-  /** Detect ScriptProcessorNode support. */
+  /** Detect ScriptProcessorNode and getUserMedia support. */
   function checkSupport(): boolean {
-    const supported = typeof AudioContext !== "undefined" &&
-      typeof AudioContext.prototype.createScriptProcessor === "function";
+    const supported =
+      typeof AudioContext !== "undefined" &&
+      typeof AudioContext.prototype.createScriptProcessor === "function" &&
+      !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
     isSupported.value = supported;
     return supported;
   }
@@ -81,6 +83,15 @@ export function useRecording() {
     }
 
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        store.showToast(
+          "Microphone access requires a secure context (HTTPS or localhost). " +
+            "If this is a packaged app on macOS, please report this bug.",
+          "error",
+        );
+        return false;
+      }
+
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 16000,

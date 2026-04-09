@@ -2,12 +2,47 @@
 
 from __future__ import annotations
 
+import http.server
+import platform
+import socket
 import sys
+import threading
 from pathlib import Path
 
 import webview
 
 from pywebvue.bridge import Bridge
+
+
+class _FrontendHTTPServer(http.server.HTTPServer):
+    """Lightweight HTTP server for serving the frontend dist directory.
+
+    Used only on macOS where WebKit (WKWebView) requires a secure context
+    (https or localhost) for navigator.mediaDevices to be available.
+    """
+
+    allow_reuse_address = True
+
+
+def _start_http_server(directory: Path, port: int = 0) -> tuple[int, _FrontendHTTPServer]:
+    """Start a background HTTP server serving *directory*.
+
+    Returns (actual_port, server). The server runs in a daemon thread and
+    stops automatically when the process exits.
+    """
+    directory = Path(directory).resolve()
+
+    class _Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, directory=str(directory), **kwargs)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass  # Suppress request logs
+
+    server = _FrontendHTTPServer(("127.0.0.1", port), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server.server_address[1], server
 
 
 def _resolve_frontend_path(frontend_dir: str) -> Path:
@@ -88,7 +123,13 @@ class App:
             url = self._dev_url
         else:
             base = _resolve_frontend_path(self._frontend_dir)
-            url = str(base / "index.html")
+            # macOS WebKit requires a secure context (https/localhost) for
+            # navigator.mediaDevices. Serve via localhost HTTP instead of file://.
+            if sys.platform == "darwin":
+                port, _ = _start_http_server(base)
+                url = f"http://127.0.0.1:{port}/index.html"
+            else:
+                url = str(base / "index.html")
 
         window = webview.create_window(
             self._title,

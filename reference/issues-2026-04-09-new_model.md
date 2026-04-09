@@ -399,3 +399,17 @@ wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/Obama.wa
   - Language 下拉点击可展开所有 12 个选项
   - Language 选 Custom 后可输入自定义值并保存
   - 删除 Audio Files 中的文件不再报 NoneType 错误
+
+## 问题
+
+- 模型列表中删除sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16
+- mac端麦克风录制功能失效：点击StartRecording按钮后报错undefined is not an object (evaluating "navigator.mediaDevices.getUserMedia
+- 有没有办法无需手动允许调用麦克风
+
+  1. 模型移除 — py/model_registry.py：已删除 sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16 条目。
+
+  2. Mac 麦克风修复 — 3 处修改：
+  - pywebvue/app.py：macOS 非 dev 模式下启动本地 HTTP 服务器（127.0.0.1:{port}），替代 file:// URL，使 WebKit
+    获得安全上下文
+  - frontend/src/composables/useRecording.ts：checkSupport() 增加 navigator.mediaDevices 检测
+  - frontend/src/composables/useRecording.ts：startRecording() 调用 getUserMedia 前增加空值检查和友好错误提示

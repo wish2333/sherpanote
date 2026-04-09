@@ -77,18 +77,6 @@ MODELS: tuple[ModelEntry, ...] = (
         required_files=("tokens.txt", "encoder.onnx", "decoder.onnx", "joiner.onnx"),
         sources=("github", "huggingface", "hf_mirror", "ghproxy"),
     ),
-    ModelEntry(
-        model_id="sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16",
-        display_name="Streaming Zipformer Small (Ru)",
-        model_type="streaming",
-        languages=("ru",),
-        size_mb=45,
-        archive_name="sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16.tar.bz2",
-        description="Compact Russian streaming model. Based on Vosk data. Lightweight and fast.",
-        required_files=("tokens.txt", "encoder.onnx", "decoder.onnx", "joiner.onnx"),
-        sha256="cc2e99ed0c67cae8801170e7b7539b4cac00b716076af86f974bf5b888d9370c",
-        sources=("github", "huggingface", "hf_mirror", "ghproxy"),
-    ),
     # -- Offline models --
     ModelEntry(
         model_id="sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
