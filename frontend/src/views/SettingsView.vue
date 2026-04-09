@@ -47,7 +47,18 @@ const languages = [
   { value: "auto", label: "Auto Detect" },
   { value: "zh", label: "Chinese" },
   { value: "en", label: "English" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "yue", label: "Cantonese" },
+  { value: "de", label: "German" },
+  { value: "fr", label: "French" },
+  { value: "es", label: "Spanish" },
+  { value: "ru", label: "Russian" },
+  { value: "it", label: "Italian" },
+  { value: "pt", label: "Portuguese" },
 ];
+
+const customLanguage = ref("");
 
 // ---- AI Preset management ----
 const aiPresets = ref<AiPreset[]>([]);
@@ -284,20 +295,26 @@ const downloadingModelId = ref<string | null>(null);
 const downloadProgress = ref<DownloadProgress | null>(null);
 const deleteConfirmId = ref<string | null>(null);
 
-const useCustomMirror = computed(() => !!asrConfig.value.mirror_url);
+const downloadSources = [
+  { value: "github", label: "GitHub (Default)" },
+  { value: "huggingface", label: "HuggingFace" },
+  { value: "hf_mirror", label: "HF-Mirror" },
+  { value: "ghproxy", label: "GitHub Proxy" },
+  { value: "modelscope", label: "ModelScope" },
+];
+
+const proxyModes = [
+  { value: "none", label: "No Proxy" },
+  { value: "system", label: "System Proxy" },
+  { value: "custom", label: "Custom Proxy" },
+];
 
 const installedStreamingModels = computed(() =>
-  installedModels.value.filter((m) => {
-    const entry = availableModels.value.find((e) => e.model_id === m.model_id);
-    return entry?.model_type === "streaming";
-  }),
+  installedModels.value.filter((m) => m.model_type === "streaming"),
 );
 
 const installedOfflineModels = computed(() =>
-  installedModels.value.filter((m) => {
-    const entry = availableModels.value.find((e) => e.model_id === m.model_id);
-    return entry?.model_type === "offline";
-  }),
+  installedModels.value.filter((m) => m.model_type === "offline"),
 );
 
 function isModelInstalled(modelId: string): boolean {
@@ -314,12 +331,19 @@ function formatSize(mb: number): string {
   return `${mb} MB`;
 }
 
-function setDownloadSource(source: string) {
-  if (source === "mirror") {
-    asrConfig.value = { ...asrConfig.value, mirror_url: asrConfig.value.mirror_url || "" };
-  } else {
-    asrConfig.value = { ...asrConfig.value, mirror_url: null };
-  }
+function isModelAvailableOnSource(model: ModelEntry): boolean {
+  return model.sources.includes(asrConfig.value.download_source);
+}
+
+function sourceBadgeLabel(source: string): string {
+  const map: Record<string, string> = {
+    github: "GH",
+    huggingface: "HF",
+    hf_mirror: "HF-M",
+    ghproxy: "GH-P",
+    modelscope: "MS",
+  };
+  return map[source] || source;
 }
 
 function toggleAutoAiMode(mode: string) {
@@ -350,6 +374,12 @@ async function loadConfig() {
     if (res.data.asr) {
       asrConfig.value = res.data.asr;
       store.asrConfig = res.data.asr;
+      // If language is not a preset value, treat as custom.
+      const langVal = res.data.asr.language;
+      if (langVal && !languages.some((l) => l.value === langVal)) {
+        customLanguage.value = langVal;
+        asrConfig.value = { ...asrConfig.value, language: "__custom__" };
+      }
     }
     autoAiModes.value = res.data.auto_ai_modes ?? [];
     store.autoAiModes = autoAiModes.value;
@@ -362,16 +392,21 @@ async function loadConfig() {
 
 async function saveConfig() {
   isSaving.value = true;
+  // Resolve custom language before saving.
+  const asrToSave = { ...asrConfig.value };
+  if (asrToSave.language === "__custom__") {
+    asrToSave.language = customLanguage.value || "auto";
+  }
   const res = await call("update_config", {
     ai: aiConfig.value,
-    asr: asrConfig.value,
+    asr: asrToSave,
     auto_ai_modes: autoAiModes.value,
     max_tokens_mode: maxTokensMode.value,
     max_versions: maxVersions.value,
   });
   if (res.success) {
     store.aiConfig = aiConfig.value;
-    store.asrConfig = asrConfig.value;
+    store.asrConfig = asrToSave;
     store.autoAiModes = autoAiModes.value;
     store.showToast("Configuration saved", "success");
   } else {
@@ -550,6 +585,61 @@ onUnmounted(() => {
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
                   Maximum versions per record. 0 = unlimited. Oldest versions are auto-deleted.
+                </span>
+              </label>
+            </div>
+
+            <!-- Auto Punctuation Toggle -->
+            <div class="form-control">
+              <label class="label cursor-pointer justify-start gap-4">
+                <span class="label-text font-medium">Auto Punctuation</span>
+                <input
+                  v-model="asrConfig.auto_punctuate"
+                  type="checkbox"
+                  class="toggle toggle-primary"
+                />
+              </label>
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Use AI to add punctuation marks to transcription output. Requires AI configuration.
+                </span>
+              </label>
+            </div>
+
+            <!-- Auto AI Processing after Transcription -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">Auto AI Processing</span>
+              </label>
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Select AI processing modes to run automatically after transcription completes.
+                </span>
+              </label>
+              <div class="flex flex-wrap gap-2 mt-1">
+                <label
+                  v-for="mode in [
+                    { key: 'polish', label: 'Polish' },
+                    { key: 'note', label: 'Notes' },
+                    { key: 'mindmap', label: 'Mind Map' },
+                    { key: 'brainstorm', label: 'Brainstorm' },
+                  ]"
+                  :key="mode.key"
+                  class="label cursor-pointer gap-1 border rounded-lg px-3 py-1"
+                  :class="autoAiModes.includes(mode.key) ? 'border-primary bg-primary/10' : 'border-base-300'"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="autoAiModes.includes(mode.key)"
+                    class="checkbox checkbox-xs checkbox-primary"
+                    @change="toggleAutoAiMode(mode.key)"
+                  />
+                  <span class="label-text text-sm">{{ mode.label }}</span>
+                </label>
+              </div>
+              <label v-if="autoAiModes.length > 0" class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Active: {{ autoAiModes.join(', ') }}. Requires AI configuration.
                 </span>
               </label>
             </div>
@@ -1074,11 +1164,28 @@ onUnmounted(() => {
               <label class="label">
                 <span class="label-text font-medium">Language</span>
               </label>
-              <select v-model="asrConfig.language" class="select select-bordered w-full">
+              <select
+                v-model="asrConfig.language"
+                class="select select-bordered w-full"
+              >
                 <option v-for="lang in languages" :key="lang.value" :value="lang.value">
                   {{ lang.label }}
                 </option>
+                <option value="__custom__">Custom...</option>
               </select>
+              <input
+                v-if="asrConfig.language === '__custom__'"
+                v-model="customLanguage"
+                type="text"
+                class="input input-bordered w-full mt-1"
+                placeholder="Enter language code (e.g. zh, en, ja)"
+                @input="asrConfig.language = customLanguage || '__custom__'"
+              />
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  Language code for ASR. Select from list or choose Custom.
+                </span>
+              </label>
             </div>
 
             <!-- GPU Toggle -->
@@ -1098,90 +1205,77 @@ onUnmounted(() => {
               </label>
             </div>
 
-            <!-- Auto Punctuation Toggle -->
-            <div class="form-control">
-              <label class="label cursor-pointer justify-start gap-4">
-                <span class="label-text font-medium">Auto Punctuation</span>
-                <input
-                  v-model="asrConfig.auto_punctuate"
-                  type="checkbox"
-                  class="toggle toggle-primary"
-                />
-              </label>
-              <label class="label">
-                <span class="label-text-alt text-base-content/40">
-                  Use AI to add punctuation marks to transcription output. Requires AI configuration.
-                </span>
-              </label>
-            </div>
-
-            <!-- Auto AI Processing after Transcription -->
-            <div class="form-control">
-              <label class="label">
-                <span class="label-text font-medium">Auto AI Processing</span>
-              </label>
-              <label class="label">
-                <span class="label-text-alt text-base-content/40">
-                  Select AI processing modes to run automatically after transcription completes.
-                </span>
-              </label>
-              <div class="flex flex-wrap gap-2 mt-1">
-                <label
-                  v-for="mode in [
-                    { key: 'polish', label: 'Polish' },
-                    { key: 'note', label: 'Notes' },
-                    { key: 'mindmap', label: 'Mind Map' },
-                    { key: 'brainstorm', label: 'Brainstorm' },
-                  ]"
-                  :key="mode.key"
-                  class="label cursor-pointer gap-1 border rounded-lg px-3 py-1"
-                  :class="autoAiModes.includes(mode.key) ? 'border-primary bg-primary/10' : 'border-base-300'"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="autoAiModes.includes(mode.key)"
-                    class="checkbox checkbox-xs checkbox-primary"
-                    @change="toggleAutoAiMode(mode.key)"
-                  />
-                  <span class="label-text text-sm">{{ mode.label }}</span>
-                </label>
-              </div>
-              <label v-if="autoAiModes.length > 0" class="label">
-                <span class="label-text-alt text-base-content/40">
-                  Active: {{ autoAiModes.join(', ') }}. Requires AI configuration.
-                </span>
-              </label>
-            </div>
-
             <!-- Download Source -->
             <div class="form-control">
               <label class="label">
                 <span class="label-text font-medium">Download Source</span>
               </label>
               <select
-                :value="useCustomMirror ? 'mirror' : 'github'"
+                v-model="asrConfig.download_source"
                 class="select select-bordered w-full"
-                @change="setDownloadSource(($event.target as HTMLSelectElement).value)"
               >
-                <option value="github">GitHub (Default)</option>
-                <option value="mirror">Custom Mirror</option>
+                <option v-for="src in downloadSources" :key="src.value" :value="src.value">
+                  {{ src.label }}
+                </option>
               </select>
             </div>
 
-            <!-- Mirror URL (shown when custom mirror selected) -->
-            <div v-if="useCustomMirror" class="form-control">
+            <!-- GitHub Proxy Domain (shown when ghproxy selected) -->
+            <div v-if="asrConfig.download_source === 'ghproxy'" class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Mirror URL</span>
+                <span class="label-text font-medium">GitHub Proxy Domain</span>
               </label>
               <input
-                v-model="asrConfig.mirror_url"
+                v-model="asrConfig.custom_ghproxy_domain"
                 type="text"
                 class="input input-bordered w-full"
-                placeholder="https://mirror.example.com/models/"
+                placeholder="https://xxx.example.com"
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Base URL for model downloads. Must end with /.
+                  Visit <a href="https://ghproxy.link/" target="_blank" rel="noopener noreferrer" class="link">ghproxy.link</a> to find currently available proxy domains, then paste one here.
+                </span>
+              </label>
+            </div>
+
+            <!-- ModelScope info -->
+            <div v-if="asrConfig.download_source === 'modelscope'" class="form-control">
+              <label class="label">
+                <span class="label-text-alt text-base-content/50">
+                  ModelScope only provides Alibaba ecosystem models (Paraformer, SenseVoice, FunASR).
+                </span>
+              </label>
+            </div>
+
+            <!-- Network Proxy -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">Network Proxy</span>
+              </label>
+              <select
+                v-model="asrConfig.proxy_mode"
+                class="select select-bordered w-full"
+              >
+                <option v-for="pm in proxyModes" :key="pm.value" :value="pm.value">
+                  {{ pm.label }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Custom Proxy URL (shown when custom proxy selected) -->
+            <div v-if="asrConfig.proxy_mode === 'custom'" class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">Proxy URL</span>
+              </label>
+              <input
+                v-model="asrConfig.proxy_url"
+                type="text"
+                class="input input-bordered w-full"
+                placeholder="http://127.0.0.1:7890"
+              />
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  HTTP/HTTPS proxy URL, e.g. http://host:port
                 </span>
               </label>
             </div>
@@ -1211,9 +1305,10 @@ onUnmounted(() => {
 
           <div class="mt-4 space-y-2">
             <div
-              v-for="model in availableModels.filter(m => m.model_type !== 'vad')"
+              v-for="model in availableModels.filter(m => m.model_type !== 'vad' && m.model_type !== 'tool')"
               :key="model.model_id"
-              class="flex items-center justify-between rounded-lg border border-base-300 p-3"
+              class="flex items-center justify-between rounded-lg border p-3"
+              :class="isModelAvailableOnSource(model) ? 'border-base-300' : 'border-base-300 bg-base-200 opacity-60'"
             >
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
@@ -1222,6 +1317,12 @@ onUnmounted(() => {
                     class="badge badge-sm"
                     :class="model.model_type === 'streaming' ? 'badge-primary' : 'badge-secondary'"
                   >{{ model.model_type }}</span>
+                  <span
+                    v-for="src in model.sources"
+                    :key="src"
+                    class="badge badge-ghost badge-xs"
+                    :class="src === asrConfig.download_source ? 'badge-outline' : ''"
+                  >{{ sourceBadgeLabel(src) }}</span>
                 </div>
                 <div class="mt-1 flex items-center gap-2 text-xs text-base-content/50">
                   <span>{{ model.languages.join(', ') }}</span>
@@ -1229,6 +1330,17 @@ onUnmounted(() => {
                   <span>{{ formatSize(model.size_mb) }}</span>
                 </div>
                 <p class="mt-0.5 text-xs text-base-content/40 truncate">{{ model.description }}</p>
+                <!-- Manual download links -->
+                <div v-if="model.manual_download_links && model.manual_download_links.length > 0" class="mt-1 flex flex-wrap gap-1">
+                  <a
+                    v-for="link in model.manual_download_links"
+                    :key="link.label"
+                    :href="link.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-xs text-primary underline"
+                  >{{ link.label }}</a>
+                </div>
               </div>
               <div class="ml-3 flex-shrink-0">
                 <!-- Download progress -->
@@ -1246,6 +1358,8 @@ onUnmounted(() => {
                 </div>
                 <!-- Already installed -->
                 <span v-else-if="isModelInstalled(model.model_id)" class="badge badge-success badge-sm">Installed</span>
+                <!-- Not available on current source -->
+                <span v-else-if="!isModelAvailableOnSource(model)" class="text-xs text-base-content/40">N/A</span>
                 <!-- Download button -->
                 <button
                   v-else
@@ -1305,7 +1419,7 @@ onUnmounted(() => {
                     v-else
                     class="btn btn-outline btn-xs"
                     @click="
-                      availableModels.find(e => e.model_id === model.model_id)?.model_type === 'streaming'
+                      model.model_type === 'streaming'
                         ? handleSetActiveModel(model.model_id, 'streaming')
                         : handleSetActiveModel(model.model_id, 'offline')
                     "
@@ -1324,6 +1438,79 @@ onUnmounted(() => {
                 >Delete</button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Related Links -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">Related Links</h2>
+          <p class="text-sm text-base-content/60">
+            External resources for sherpa-onnx models and tools. You can manually download models and place them in the model directory.
+          </p>
+          <div class="mt-4 space-y-3">
+
+            <div class="divider text-xs">Model Sources</div>
+
+            <!-- Model source links -->
+            <div class="grid grid-cols-1 gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-sm">GitHub Releases (All Models)</span>
+                <a
+                  href="https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-outline btn-xs"
+                >Open</a>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">HuggingFace (csukuangfj/models)</span>
+                <a
+                  href="https://huggingface.co/csukuangfj/models"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-outline btn-xs"
+                >Open</a>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">ModelScope (Alibaba Ecosystem)</span>
+                <a
+                  href="https://www.modelscope.cn/models/zhaochaoqun/sherpa-onnx-asr-models/files"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-outline btn-xs"
+                >Open</a>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">GitHub Proxy List</span>
+                <a
+                  href="https://ghproxy.link/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-outline btn-xs"
+                >Open</a>
+              </div>
+            </div>
+
+            <div class="divider text-xs">Other Links</div>
+            
+            <!-- Subtitle generation tools -->
+            <div v-for="tool in availableModels.filter(m => m.model_type === 'tool')" :key="tool.model_id">
+              <div class="text-sm font-medium">{{ tool.display_name }}</div>
+              <div class="text-xs text-base-content/50">{{ tool.description }}</div>
+              <div class="mt-1 flex gap-2">
+                <a
+                  v-for="link in tool.manual_download_links"
+                  :key="link.label"
+                  :href="link.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-outline btn-xs"
+                >{{ link.label }}</a>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>

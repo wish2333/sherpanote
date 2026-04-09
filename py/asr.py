@@ -62,6 +62,151 @@ class SherpaASR:
     def is_streaming(self) -> bool:
         return self._is_streaming
 
+    # ---- Model file helpers ----
+
+    @staticmethod
+    def _find_file(model_dir: Path, *candidates: str) -> Path | None:
+        """Find the first matching model file in model_dir (recursive).
+
+        Each candidate is tried as:
+        1. Exact filename
+        2. Prefixed variant (e.g. "distil-large-v3.5-tokens.txt" matches "tokens.txt")
+        3. Quantized variant (e.g. "encoder.int8.onnx" matches "encoder.onnx")
+        4. Prefixed + quantized (e.g. "distil-large-v3.5-encoder.int8.onnx" matches "encoder.onnx")
+
+        Searches model_dir and one level of subdirectories.
+        """
+        search_dirs = [model_dir]
+        for sub in model_dir.iterdir():
+            if sub.is_dir() and not sub.name.startswith("."):
+                search_dirs.append(sub)
+
+        for search_dir in search_dirs:
+            for name in candidates:
+                exact = search_dir / name
+                if exact.exists():
+                    return exact
+                for f in search_dir.iterdir():
+                    if f.is_file() and f.name != name and SherpaASR._match_model_file(f.name, name):
+                        logger.debug("Found variant: %s -> %s", name, f.name)
+                        return f
+        return None
+
+    @staticmethod
+    def _match_model_file(actual_name: str, candidate: str) -> bool:
+        """Check if actual_name matches candidate for model file lookup.
+
+        Handles prefixed variants (e.g. "distil-large-v3.5-tokens.txt")
+        and quantization suffixes (e.g. "encoder.int8.onnx" vs "encoder.onnx").
+
+        Matching rules:
+        - Extensions must match (e.g. .onnx, .txt)
+        - If candidate specifies quantization (e.g. encoder.int8.onnx),
+          actual must have the same quantization
+        - Core name must appear at end of actual core name (allows prefix)
+        """
+        _QUANT = ('int8', 'int4', 'fp16', 'fp32')
+
+        cand_parts = candidate.split('.')
+        if len(cand_parts) < 2:
+            return False
+        cand_ext = cand_parts[-1]
+        if len(cand_parts) == 2:
+            cand_core, cand_quant = cand_parts[0], None
+        elif len(cand_parts) == 3 and cand_parts[1] in _QUANT:
+            cand_core, cand_quant = cand_parts[0], cand_parts[1]
+        else:
+            return actual_name.endswith(candidate)
+
+        act_parts = actual_name.split('.')
+        if len(act_parts) < 2 or act_parts[-1] != cand_ext:
+            return False
+        act_rest = act_parts[:-1]  # Everything before extension
+        if len(act_rest) >= 2 and act_rest[-1] in _QUANT:
+            act_quant = act_rest[-1]
+            act_core = '.'.join(act_rest[:-1])
+        else:
+            act_core = '.'.join(act_rest)
+            act_quant = None
+
+        if cand_quant is not None and act_quant != cand_quant:
+            return False
+        return act_core.endswith(cand_core)
+
+    @staticmethod
+    def _find_tokenizer_dir(model_dir: Path) -> Path | None:
+        """Find a tokenizer directory (containing vocab.json) in model_dir.
+
+        Searches model_dir and one level of subdirectories.
+        Used by Qwen3-ASR and FunASR Nano models.
+        """
+        # Check model_dir itself.
+        if (model_dir / "vocab.json").exists():
+            return model_dir
+        # Check subdirectories.
+        for sub in model_dir.iterdir():
+            if sub.is_dir() and not sub.name.startswith(".") and (sub / "vocab.json").exists():
+                return sub
+        return None
+
+    @staticmethod
+    def _has_model_files(model_dir: Path) -> bool:
+        """Check if a directory looks like it contains a sherpa-onnx model.
+
+        Searches model_dir and one level of subdirectories.
+        """
+        if SherpaASR._find_file(model_dir, "tokens.txt"):
+            return True
+        # Check for any .onnx file in model_dir or subdirs.
+        if any((model_dir / f).is_file() and f.endswith(".onnx")
+               for f in model_dir.iterdir() if f.is_file()):
+            return True
+        for sub in model_dir.iterdir():
+            if sub.is_dir():
+                if any((sub / f).is_file() and f.endswith(".onnx")
+                       for f in sub.iterdir() if f.is_file()):
+                    return True
+        return False
+
+    @staticmethod
+    def _classify_model_dir(model_dir: Path) -> str | None:
+        """Classify a model directory as 'streaming', 'offline', or None.
+
+        Uses file presence heuristics:
+        - joiner.onnx present -> Transducer/Zipformer (always streaming)
+        - model.onnx present -> Offline (Paraformer/SenseVoice)
+        - conv_frontend.onnx present -> Offline (Qwen3-ASR)
+        - encoder_adaptor.onnx or llm.onnx -> Offline (FunASR Nano)
+        - encoder + decoder only (no joiner, no model) -> Ambiguous:
+          dir name with "whisper" -> offline
+          dir name with "streaming"/"online"/"zipformer" -> streaming
+          default -> offline
+        """
+        has_joiner = SherpaASR._find_file(model_dir, "joiner.onnx") is not None
+        has_model = SherpaASR._find_file(model_dir, "model.onnx", "model.int8.onnx") is not None
+        has_encoder = SherpaASR._find_file(model_dir, "encoder.onnx", "encoder.int8.onnx") is not None
+        has_decoder = SherpaASR._find_file(model_dir, "decoder.onnx", "decoder.int8.onnx") is not None
+        has_conv_frontend = SherpaASR._find_file(model_dir, "conv_frontend.onnx") is not None
+        has_encoder_adaptor = SherpaASR._find_file(model_dir, "encoder_adaptor.onnx", "encoder_adaptor.int8.onnx") is not None
+        has_llm = SherpaASR._find_file(model_dir, "llm.onnx", "llm.int8.onnx") is not None
+
+        if has_joiner:
+            return "streaming"
+        if has_model:
+            return "offline"
+        if has_conv_frontend:
+            return "offline"
+        if has_encoder_adaptor or has_llm:
+            return "offline"
+        if has_encoder and has_decoder:
+            dir_name = model_dir.name.lower()
+            if "whisper" in dir_name:
+                return "offline"
+            if any(kw in dir_name for kw in ("streaming", "online", "zipformer")):
+                return "streaming"
+            return "offline"
+        return None
+
     # ---- Model paths ----
 
     def _model_dir(self) -> Path:
@@ -113,20 +258,13 @@ class SherpaASR:
                 if candidate.is_dir():
                     return candidate
 
-        # 3. Search user models directory.
+        # 3. Scan user models directory for streaming-classified models.
         base = self._model_dir()
-        candidates = [
-            base / "sherpa-onnx-streaming-paraformer-bilingual-zh-en",
-            base / "sherpa-onnx-streaming-zipformer-en",
-            base / "sherpa-onnx-streaming-zipformer-zh",
-            base / "streaming",
-        ]
-        for c in candidates:
-            if c.is_dir():
-                return c
-        # Also check if base itself contains a tokens.txt (flat layout).
-        if (base / "tokens.txt").exists():
-            return base
+        if base.is_dir():
+            for entry in sorted(base.iterdir()):
+                if entry.is_dir() and SherpaASR._classify_model_dir(entry) == "streaming":
+                    return entry
+
         return None
 
     def _find_offline_model(self) -> Path | None:
@@ -151,32 +289,13 @@ class SherpaASR:
                 if candidate.is_dir():
                     return candidate
 
-        # 3. Search user models directory.
+        # 3. Scan user models directory for offline-classified models.
         base = self._model_dir()
-        candidates = [
-            base / "sherpa-onnx-paraformer-zh",
-            base / "sherpa-onnx-whisper-small",
-            base / "sherpa-onnx-whisper-base",
-            base / "sherpa-onnx-sense-voice-zh-en",
-            base / "offline",
-        ]
-        for c in candidates:
-            if c.is_dir():
-                return c
-
-        # 4. Scan for any subdirectory that contains a model file.
         if base.is_dir():
             for entry in sorted(base.iterdir()):
-                if entry.is_dir() and entry not in candidates:
-                    if (
-                        (entry / "model.onnx").exists()
-                        or (entry / "model.int8.onnx").exists()
-                        or (entry / "encoder.onnx").exists()
-                    ):
-                        return entry
+                if entry.is_dir() and SherpaASR._classify_model_dir(entry) == "offline":
+                    return entry
 
-        if (base / "tokens.txt").exists():
-            return base
         return None
 
     # ---- Streaming (OnlineRecognizer) ----
@@ -216,7 +335,8 @@ class SherpaASR:
         """Create an OnlineRecognizer from the model directory.
 
         Detects model type (paraformer vs zipformer) based on
-        which files are present.
+        which files are present. Supports prefixed filenames
+        (e.g. distil-large-v3.5-encoder.int8.onnx).
         """
         import sys
         import traceback
@@ -225,13 +345,12 @@ class SherpaASR:
         logger.info("Python version: %s", sys.version)
         logger.info("Platform: %s", sys.platform)
 
-        # Check for paraformer model files.
-        paraformer_encoder = model_dir / "encoder.int8.onnx"
-        if not paraformer_encoder.exists():
-            paraformer_encoder = model_dir / "encoder.onnx"
+        # Determine model type: check for joiner.onnx first (Zipformer/Transducer)
+        # to avoid misclassifying Zipformer models as Paraformer.
+        joiner = self._find_file(model_dir, "joiner.onnx")
 
-        tokens = model_dir / "tokens.txt"
-        if not tokens.exists():
+        tokens = self._find_file(model_dir, "tokens.txt")
+        if not tokens:
             raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
 
         num_threads = 2
@@ -241,35 +360,11 @@ class SherpaASR:
             provider = "cuda"
 
         try:
-            if paraformer_encoder.exists():
-                # Paraformer streaming model.
-                decoder = model_dir / "decoder.int8.onnx"
-                if not decoder.exists():
-                    decoder = model_dir / "decoder.onnx"
-                logger.info("Using streaming Paraformer model")
-                logger.info("Creating OnlineRecognizer.from_paraformer with:")
-                logger.info("  tokens: %s", tokens)
-                logger.info("  encoder: %s", paraformer_encoder)
-                logger.info("  decoder: %s", decoder)
-                logger.info("  provider: %s", provider)
-
-                recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
-                    tokens=str(tokens),
-                    encoder=str(paraformer_encoder),
-                    decoder=str(decoder),
-                    num_threads=num_threads,
-                    sample_rate=self._config.sample_rate,
-                    feature_dim=80,
-                    provider=provider,
-                )
-                logger.info("OnlineRecognizer created successfully (Paraformer)")
-                return recognizer
-            else:
+            if joiner and joiner.exists():
                 # Transducer (zipformer) streaming model.
-                encoder = model_dir / "encoder.onnx"
-                decoder = model_dir / "decoder.onnx"
-                joiner = model_dir / "joiner.onnx"
-                if not all(f.exists() for f in (encoder, decoder, joiner)):
+                encoder = self._find_file(model_dir, "encoder.onnx")
+                decoder = self._find_file(model_dir, "decoder.onnx")
+                if not all(f and f.exists() for f in (encoder, decoder)):
                     raise FileNotFoundError(
                         f"Model files not found in {model_dir}. "
                         "Expected encoder.onnx, decoder.onnx, joiner.onnx"
@@ -290,6 +385,33 @@ class SherpaASR:
                     provider=provider,
                 )
                 logger.info("OnlineRecognizer created successfully (Zipformer)")
+                return recognizer
+            else:
+                # Paraformer streaming model (no joiner.onnx).
+                paraformer_encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
+                if not paraformer_encoder or not paraformer_encoder.exists():
+                    raise FileNotFoundError(
+                        f"Model files not found in {model_dir}. "
+                        "Expected encoder.onnx and decoder.onnx"
+                    )
+                decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
+                logger.info("Using streaming Paraformer model")
+                logger.info("Creating OnlineRecognizer.from_paraformer with:")
+                logger.info("  tokens: %s", tokens)
+                logger.info("  encoder: %s", paraformer_encoder)
+                logger.info("  decoder: %s", decoder)
+                logger.info("  provider: %s", provider)
+
+                recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
+                    tokens=str(tokens),
+                    encoder=str(paraformer_encoder),
+                    decoder=str(decoder),
+                    num_threads=num_threads,
+                    sample_rate=self._config.sample_rate,
+                    feature_dim=80,
+                    provider=provider,
+                )
+                logger.info("OnlineRecognizer created successfully (Paraformer)")
                 return recognizer
         except Exception as e:
             logger.error("Failed to create online recognizer: %s", e)
@@ -503,30 +625,83 @@ class SherpaASR:
         """Create an OfflineRecognizer from the model directory.
 
         Model detection priority:
-        1. Paraformer (model.int8.onnx or model.onnx, but not SenseVoice)
-        2. SenseVoice (model.onnx when model dir name contains "sense-voice")
-        3. Whisper (encoder.onnx + decoder.onnx)
-        """
-        tokens = model_dir / "tokens.txt"
-        if not tokens.exists():
-            raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
+        1. Qwen3-ASR (conv_frontend.onnx + encoder + decoder + tokenizer dir)
+        2. FunASR Nano (encoder_adaptor + llm + embedding + tokenizer dir)
+        3. Paraformer (model.int8.onnx or model.onnx, but not SenseVoice)
+        4. SenseVoice (model.onnx when model dir name contains "sense-voice")
+        5. Whisper (encoder.onnx + decoder.onnx)
 
+        Supports prefixed filenames (e.g. distil-large-v3.5-tokens.txt).
+        """
         num_threads = 4
         provider = "cpu"
         if self._config.use_gpu:
             provider = "cuda"
+
+        # --- Qwen3-ASR (conv_frontend.onnx) ---
+        conv_frontend = self._find_file(model_dir, "conv_frontend.onnx")
+        if conv_frontend:
+            encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
+            decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
+            tokenizer_dir = self._find_tokenizer_dir(model_dir)
+            if encoder and decoder and tokenizer_dir:
+                logger.info("Using Qwen3-ASR offline model (dir: %s)", model_dir.name)
+                # Patch: from_qwen3_asr passes 'hotwords' to OfflineQwen3ASRModelConfig
+                # which doesn't accept it. Strip it before calling.
+                _Qwen3Config = sherpa_onnx.OfflineQwen3ASRModelConfig
+                _orig_qwen3_init = _Qwen3Config.__init__
+                _Qwen3Config.__init__ = lambda self, **kw: _orig_qwen3_init(self, **{k: v for k, v in kw.items() if k != "hotwords"})
+                try:
+                    return sherpa_onnx.OfflineRecognizer.from_qwen3_asr(
+                        conv_frontend=str(conv_frontend),
+                        encoder=str(encoder),
+                        decoder=str(decoder),
+                        tokenizer=str(tokenizer_dir),
+                        num_threads=num_threads,
+                        provider=provider,
+                        max_total_len=512,
+                        max_new_tokens=128,
+                    )
+                finally:
+                    _Qwen3Config.__init__ = _orig_qwen3_init
+
+        # --- FunASR Nano (encoder_adaptor.onnx or llm.onnx) ---
+        encoder_adaptor = self._find_file(model_dir, "encoder_adaptor.int8.onnx", "encoder_adaptor.onnx")
+        llm = self._find_file(model_dir, "llm.int8.onnx", "llm.onnx")
+        if encoder_adaptor or llm:
+            if not encoder_adaptor:
+                encoder_adaptor = self._find_file(model_dir, "encoder_adaptor.int8.onnx", "encoder_adaptor.onnx")
+            if not llm:
+                llm = self._find_file(model_dir, "llm.int8.onnx", "llm.onnx")
+            embedding = self._find_file(model_dir, "embedding.int8.onnx", "embedding.onnx")
+            tokenizer_dir = self._find_tokenizer_dir(model_dir)
+            if encoder_adaptor and llm and embedding and tokenizer_dir:
+                logger.info("Using FunASR Nano offline model (dir: %s)", model_dir.name)
+                return sherpa_onnx.OfflineRecognizer.from_funasr_nano(
+                    encoder_adaptor=str(encoder_adaptor),
+                    llm=str(llm),
+                    embedding=str(embedding),
+                    tokenizer=str(tokenizer_dir),
+                    num_threads=num_threads,
+                    provider=provider,
+                )
+
+        # --- Paraformer / SenseVoice / Whisper (require tokens.txt) ---
+        tokens = self._find_file(model_dir, "tokens.txt")
+        if not tokens:
+            raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
 
         # Check for SenseVoice by directory name.
         dir_name = model_dir.name.lower()
         is_sense_voice = "sense-voice" in dir_name or "sensevoice" in dir_name
 
         # Try Paraformer model (model.int8.onnx takes priority).
-        paraformer_model = model_dir / "model.int8.onnx"
-        if not paraformer_model.exists():
+        paraformer_model = self._find_file(model_dir, "model.int8.onnx")
+        if not paraformer_model:
             # model.onnx could be Paraformer or SenseVoice -- use dir name to decide.
             if not is_sense_voice:
-                paraformer_model = model_dir / "model.onnx"
-        if paraformer_model.exists():
+                paraformer_model = self._find_file(model_dir, "model.onnx")
+        if paraformer_model:
             logger.info("Using Paraformer offline model (dir: %s)", model_dir.name)
             return sherpa_onnx.OfflineRecognizer.from_paraformer(
                 tokens=str(tokens),
@@ -536,8 +711,8 @@ class SherpaASR:
             )
 
         # Try SenseVoice model (only if directory name indicates SenseVoice).
-        sense_voice_model = model_dir / "model.onnx"
-        if is_sense_voice and sense_voice_model.exists():
+        sense_voice_model = self._find_file(model_dir, "model.onnx", "model.int8.onnx")
+        if is_sense_voice and sense_voice_model:
             logger.info("Using SenseVoice offline model")
             return sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(sense_voice_model),
@@ -548,9 +723,9 @@ class SherpaASR:
             )
 
         # Fallback: try Whisper model.
-        whisper_encoder = model_dir / "encoder.onnx"
-        whisper_decoder = model_dir / "decoder.onnx"
-        if whisper_encoder.exists() and whisper_decoder.exists():
+        whisper_encoder = self._find_file(model_dir, "encoder.onnx")
+        whisper_decoder = self._find_file(model_dir, "decoder.onnx")
+        if whisper_encoder and whisper_decoder:
             logger.info("Using Whisper offline model")
             return sherpa_onnx.OfflineRecognizer.from_whisper(
                 tokens=str(tokens),
@@ -586,7 +761,7 @@ class SherpaASR:
         config = sherpa_onnx.VadModelConfig()
         if vad_model.exists():
             config.silero_vad.model = str(vad_model)
-        config.silero_vad.min_silence_duration = 0.25
+        config.silero_vad.min_silence_duration = 0.4
         config.sample_rate = 16000
 
         return sherpa_onnx.VoiceActivityDetector(

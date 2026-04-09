@@ -66,8 +66,11 @@ export interface AsrConfig {
   use_gpu: boolean;
   active_streaming_model: string;
   active_offline_model: string;
-  mirror_url: string | null;
   auto_punctuate: boolean;
+  download_source: string;
+  custom_ghproxy_domain: string | null;
+  proxy_mode: string;
+  proxy_url: string | null;
 }
 
 export interface AppSettings {
@@ -105,6 +108,8 @@ export interface ModelEntry {
   languages: string[];
   size_mb: number;
   description: string;
+  sources: string[];
+  manual_download_links: Array<{ label: string; url: string }>;
 }
 
 export interface InstalledModel {

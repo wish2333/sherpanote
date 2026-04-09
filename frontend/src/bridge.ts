@@ -113,3 +113,7 @@ export function pickDirectory() {
 export function validateModel(modelId: string) {
   return call<{ valid: boolean; missing?: string[] }>("validate_model", modelId);
 }
+
+export function getDownloadLinks(modelId: string) {
+  return call<Array<{ label: string; url: string }>>("get_download_links", modelId);
+}

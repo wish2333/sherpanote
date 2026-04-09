@@ -57,7 +57,10 @@ class SherpaNoteAPI(Bridge):
         self._processing_preset_store = ProcessingPresetStore()
         self._model_installer = _mm.ModelInstaller(
             self._config.asr.model_dir or _DEFAULT_MODELS_DIR,
-            mirror_url=self._config.asr.mirror_url,
+            download_source=self._config.asr.download_source,
+            custom_ghproxy_domain=self._config.asr.custom_ghproxy_domain,
+            proxy_mode=self._config.asr.proxy_mode,
+            proxy_url=self._config.asr.proxy_url,
         )
         # Track record IDs with unsaved changes for exit-time versioning.
         self._dirty_record_ids: set[str] = set()
@@ -122,8 +125,11 @@ class SherpaNoteAPI(Bridge):
             use_gpu=self._config.asr.use_gpu,
             active_streaming_model=self._config.asr.active_streaming_model,
             active_offline_model=self._config.asr.active_offline_model,
-            mirror_url=self._config.asr.mirror_url,
             auto_punctuate=self._config.asr.auto_punctuate,
+            download_source=self._config.asr.download_source,
+            custom_ghproxy_domain=self._config.asr.custom_ghproxy_domain,
+            proxy_mode=self._config.asr.proxy_mode,
+            proxy_url=self._config.asr.proxy_url,
         )
 
     @expose
@@ -781,17 +787,7 @@ class SherpaNoteAPI(Bridge):
     def list_available_models(self, model_type: str = None) -> dict:
         """List models from the registry catalog."""
         models = _mr.list_models(model_type)
-        data = [
-            {
-                "model_id": m.model_id,
-                "display_name": m.display_name,
-                "model_type": m.model_type,
-                "languages": list(m.languages),
-                "size_mb": m.size_mb,
-                "description": m.description,
-            }
-            for m in models
-        ]
+        data = [_mr.model_to_dict(m) for m in models]
         return {"success": True, "data": data}
 
     @expose
@@ -819,7 +815,11 @@ class SherpaNoteAPI(Bridge):
             or str(__import__("pathlib").Path.home() / "sherpanote" / "models")
         )
         self._model_installer = _mm.ModelInstaller(
-            models_dir, mirror_url=self._config.asr.mirror_url,
+            models_dir,
+            download_source=self._config.asr.download_source,
+            custom_ghproxy_domain=self._config.asr.custom_ghproxy_domain,
+            proxy_mode=self._config.asr.proxy_mode,
+            proxy_url=self._config.asr.proxy_url,
         )
 
         def on_progress(info: dict) -> None:
@@ -871,6 +871,14 @@ class SherpaNoteAPI(Bridge):
         )
         result = _mm.validate_model(model_id, models_dir)
         return {"success": True, "data": result}
+
+    @expose
+    def get_download_links(self, model_id: str) -> dict:
+        """Get manual download links for a model."""
+        entry = _mr.get_model(model_id)
+        if entry is None:
+            return {"success": False, "error": f"Model not found: {model_id}"}
+        return {"success": True, "data": list(entry.manual_download_links)}
 
     @expose
     def pick_directory(self) -> dict:
@@ -1053,7 +1061,10 @@ class SherpaNoteAPI(Bridge):
             # Must pass the full record data to avoid overwriting other fields.
             normalized = str(p)
             for rec in self._storage.list():
-                rec_path = str(Path(rec.get("audio_path", "")).resolve())
+                rec_audio = rec.get("audio_path")
+                if not rec_audio:
+                    continue
+                rec_path = str(Path(rec_audio).resolve())
                 if rec_path == normalized:
                     updated = dict(rec)
                     updated["audio_path"] = None

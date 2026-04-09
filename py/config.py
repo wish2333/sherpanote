@@ -32,8 +32,11 @@ class AsrConfig:
     use_gpu: bool = False
     active_streaming_model: str = ""
     active_offline_model: str = ""
-    mirror_url: str | None = None
     auto_punctuate: bool = False
+    download_source: str = "github"
+    custom_ghproxy_domain: str | None = None
+    proxy_mode: str = "none"
+    proxy_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,8 +82,11 @@ class AppConfig:
                 "use_gpu": self.asr.use_gpu,
                 "active_streaming_model": self.asr.active_streaming_model,
                 "active_offline_model": self.asr.active_offline_model,
-                "mirror_url": self.asr.mirror_url,
                 "auto_punctuate": self.asr.auto_punctuate,
+                "download_source": self.asr.download_source,
+                "custom_ghproxy_domain": self.asr.custom_ghproxy_domain,
+                "proxy_mode": self.asr.proxy_mode,
+                "proxy_url": self.asr.proxy_url,
             },
             "ai": {
                 "provider": self.ai.provider,
@@ -100,6 +106,17 @@ class AppConfig:
         """Deserialize from dict. Missing keys fall back to defaults."""
         asr_d = data.get("asr", {})
         ai_d = data.get("ai", {})
+        # Migrate old mirror_url to new download_source.
+        download_source = asr_d.get("download_source", "github")
+        custom_ghproxy_domain = asr_d.get("custom_ghproxy_domain")
+        if download_source == "github" and asr_d.get("mirror_url"):
+            old_url = asr_d["mirror_url"]
+            if "hf-mirror" in old_url:
+                download_source = "hf_mirror"
+            elif old_url != "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/":
+                download_source = "github"
+                custom_ghproxy_domain = old_url
+            logger.info("Migrated old mirror_url to download_source=%s", download_source)
         return AppConfig(
             data_dir=data.get("data_dir", _DEFAULT_DATA_DIR),
             asr=AsrConfig(
@@ -109,8 +126,11 @@ class AppConfig:
                 use_gpu=asr_d.get("use_gpu", False),
                 active_streaming_model=asr_d.get("active_streaming_model", ""),
                 active_offline_model=asr_d.get("active_offline_model", ""),
-                mirror_url=asr_d.get("mirror_url"),
                 auto_punctuate=asr_d.get("auto_punctuate", False),
+                download_source=download_source,
+                custom_ghproxy_domain=custom_ghproxy_domain,
+                proxy_mode=asr_d.get("proxy_mode", "none"),
+                proxy_url=asr_d.get("proxy_url"),
             ),
             ai=AiConfig(
                 provider=ai_d.get("provider", "openai"),

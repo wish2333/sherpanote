@@ -64,8 +64,11 @@ export const useAppStore = defineStore("app", () => {
     use_gpu: false,
     active_streaming_model: "",
     active_offline_model: "",
-    mirror_url: null,
     auto_punctuate: false,
+    download_source: "github",
+    custom_ghproxy_domain: null,
+    proxy_mode: "none",
+    proxy_url: null,
   });
 
   /* ---- toast notifications ---- */
