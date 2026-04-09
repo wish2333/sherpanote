@@ -114,6 +114,11 @@ elif sys.platform == "darwin":
 
 pyz = PYZ(a.pure)
 
+# macOS: add microphone permission so WKWebView exposes navigator.mediaDevices
+_darwin_info_plist = {
+    "NSMicrophoneUsageDescription": "SherpaNote needs microphone access for speech recognition.",
+} if sys.platform == "darwin" else None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -127,6 +132,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=ICON,
+    info_plist=_darwin_info_plist,
 )
 
 coll = COLLECT(

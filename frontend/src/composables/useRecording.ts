@@ -83,11 +83,19 @@ export function useRecording() {
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        store.showToast(
-          "Microphone access requires a secure context (HTTPS or localhost). " +
-            "If this is a packaged app on macOS, please report this bug.",
-          "error",
-        );
+        const isMac = navigator.userAgent.includes("Mac") || navigator.platform.includes("Mac");
+        if (isMac) {
+          store.showToast(
+            "macOS requires NSMicrophoneUsageDescription in Info.plist for microphone access. " +
+              "Please rebuild the app with the updated app.spec.",
+            "error",
+          );
+        } else {
+          store.showToast(
+            "Microphone access requires a secure context (HTTPS or localhost).",
+            "error",
+          );
+        }
         return false;
       }
 
