@@ -131,7 +131,15 @@ class SherpaASR:
 
         if cand_quant is not None and act_quant != cand_quant:
             return False
-        return act_core.endswith(cand_core)
+        # Match both suffix patterns (e.g. "encoder-epoch-99-avg-1")
+        # and prefix patterns (e.g. "distil-large-v3.5-encoder").
+        return (
+            act_core == cand_core
+            or act_core.startswith(cand_core + "-")
+            or act_core.startswith(cand_core + "_")
+            or act_core.endswith("-" + cand_core)
+            or act_core.endswith("_" + cand_core)
+        )
 
     @staticmethod
     def _find_tokenizer_dir(model_dir: Path) -> Path | None:

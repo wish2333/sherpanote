@@ -402,14 +402,23 @@ wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/Obama.wa
 
 ## 问题
 
-- 模型列表中删除sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16
+- 模型列表中删除sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16、sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20
+- 模型列表中添加sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en、sherpa-onnx-whisper-large-v3、sherpa-onnx-whisper-large-v2
 - mac端麦克风录制功能失效：点击StartRecording按钮后报错undefined is not an object (evaluating "navigator.mediaDevices.getUserMedia
-- 有没有办法无需手动允许调用麦克风
+- 有没有办法无需手动允许调用麦克风（没有）
+
+### 解决方案
 
   1. 模型移除 — py/model_registry.py：已删除 sherpa-onnx-streaming-zipformer-small-ru-vosk-2025-08-16 条目。
 
   2. Mac 麦克风修复 — 3 处修改：
-  - pywebvue/app.py：macOS 非 dev 模式下启动本地 HTTP 服务器（127.0.0.1:{port}），替代 file:// URL，使 WebKit
+- pywebvue/app.py：macOS 非 dev 模式下启动本地 HTTP 服务器（127.0.0.1:{port}），替代 file:// URL，使 WebKit
     获得安全上下文
-  - frontend/src/composables/useRecording.ts：checkSupport() 增加 navigator.mediaDevices 检测
-  - frontend/src/composables/useRecording.ts：startRecording() 调用 getUserMedia 前增加空值检查和友好错误提示
+- frontend/src/composables/useRecording.ts：checkSupport() 增加 navigator.mediaDevices 检测
+- frontend/src/composables/useRecording.ts：startRecording() 调用 getUserMedia 前增加空值检查和友好错误提示
+- 在app.spec中添加NSMicrophoneUsageDescription声明，解决macOS打包版WKWebView未暴露navigator.mediaDevices的问题
+- 优化错误提示，区分macOS和其他平台的权限提示信息
+- 移除不必要的HTTP服务器实现，根因是Info.plist中缺少麦克风权限声明
+- 将Info.plist配置从EXE移动到BUNDLE步骤，解决macOS onedir构建中权限声明未生效的问题
+- 确保NSMicrophoneUsageDescription在.app包中被正确识别，使WKWebView能够暴露navigator.mediaDevices
+- 添加macOS特定的BUNDLE步骤，生成包含权限声明的.app包结构
