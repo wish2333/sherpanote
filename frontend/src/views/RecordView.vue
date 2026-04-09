@@ -10,18 +10,20 @@
  *
  * Uses AudioRecorder, TranscriptPanel, useRecording, useTranscript.
  */
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useRecording } from "../composables/useRecording";
 import { useTranscript } from "../composables/useTranscript";
 import { useDragDrop } from "../composables/useDragDrop";
-import { call, onEvent } from "../bridge";
+import { call, onEvent, listAvailableModels, listInstalledModels } from "../bridge";
 import { useAppStore } from "../stores/appStore";
+import type { ModelEntry, InstalledModel, AsrConfig } from "../types";
 import AudioRecorder from "../components/AudioRecorder.vue";
 import TranscriptPanel from "../components/TranscriptPanel.vue";
 
 const router = useRouter();
 const route = useRoute();
+const store = useAppStore();
 
 const {
   isRecording,
@@ -38,6 +40,67 @@ const {
   transcribeFile,
   saveAsRecord,
 } = useTranscript();
+
+// ---- Quick settings state ----
+const availableModels = ref<ModelEntry[]>([]);
+const installedModels = ref<InstalledModel[]>([]);
+
+const languages = [
+  { value: "auto", label: "Auto" },
+  { value: "zh", label: "Chinese" },
+  { value: "en", label: "English" },
+  { value: "ja", label: "Japanese" },
+  { value: "ko", label: "Korean" },
+  { value: "yue", label: "Cantonese" },
+  { value: "de", label: "German" },
+  { value: "fr", label: "French" },
+  { value: "es", label: "Spanish" },
+  { value: "ru", label: "Russian" },
+  { value: "it", label: "Italian" },
+  { value: "pt", label: "Portuguese" },
+];
+
+const installedStreamingModels = computed(() =>
+  installedModels.value.filter((m) => m.model_type === "streaming"),
+);
+
+const installedOfflineModels = computed(() =>
+  installedModels.value.filter((m) => m.model_type === "offline"),
+);
+
+function displayName(modelId: string): string {
+  return availableModels.value.find((m) => m.model_id === modelId)?.display_name ?? modelId;
+}
+
+async function loadModels() {
+  const [availRes, instRes] = await Promise.all([
+    listAvailableModels(),
+    listInstalledModels(),
+  ]);
+  if (availRes.success && availRes.data) {
+    availableModels.value = availRes.data;
+  }
+  if (instRes.success && instRes.data) {
+    installedModels.value = instRes.data;
+  }
+}
+
+async function loadAsrConfig() {
+  const res = await call<{ asr: AsrConfig }>("get_config");
+  if (res.success && res.data?.asr) {
+    store.asrConfig = res.data.asr;
+  }
+}
+
+async function saveQuickSetting() {
+  await call("update_config", {
+    ai: store.aiConfig,
+    asr: store.asrConfig,
+    auto_ai_modes: store.autoAiModes,
+  });
+}
+
+// ---- Recording callbacks ----
 
 async function handleRecordingComplete(data: { text: string; segments: { text: string; timestamp: number[] }[]; duration: number; audio_path: string | null }) {
   stopListening();
@@ -71,7 +134,6 @@ async function handleFileSelected(filePath: string) {
 // Import & Transcribe: copy file into data/audio/ first, then transcribe.
 const isImporting = ref(false);
 const importProgress = ref(0);
-const store = useAppStore();
 
 async function handleImportAndTranscribe() {
   const res = await call<string[]>("pick_audio_file");
@@ -148,7 +210,8 @@ const {
 });
 
 // Start listening for ASR events on mount.
-onMounted(() => {
+onMounted(async () => {
+  await Promise.all([loadModels(), loadAsrConfig()]);
   startListening();
 
   // Check for route query ?file=xxx (redirected from HomeView drag-drop).
@@ -173,7 +236,7 @@ onUnmounted(() => {
     @drop="onDrop"
   >
     <!-- Header -->
-    <div class="mb-6 flex items-center gap-3">
+    <div class="mb-4 flex items-center gap-3">
       <button class="btn btn-ghost btn-sm" @click="router.push('/')">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 18l-6-6 6-6" />
@@ -183,6 +246,60 @@ onUnmounted(() => {
       <h1 class="text-xl font-bold tracking-tight text-base-content">
         {{ isRecording ? "Recording..." : "New Recording" }}
       </h1>
+    </div>
+
+    <!-- Quick Settings Bar (hidden during active recording/transcription) -->
+    <div
+      v-if="!isRecording && !isTranscribingFile && !isLoadingModel && !isImporting"
+      class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-base-300 bg-base-200 p-3 text-sm"
+    >
+      <!-- Streaming Model -->
+      <div class="flex items-center gap-1.5">
+        <label class="text-base-content/50 whitespace-nowrap">Streaming:</label>
+        <select
+          v-model="store.asrConfig.active_streaming_model"
+          class="select select-bordered select-sm min-w-[160px]"
+          @change="saveQuickSetting"
+        >
+          <option value="">(Auto)</option>
+          <option
+            v-for="m in installedStreamingModels"
+            :key="m.model_id"
+            :value="m.model_id"
+          >{{ displayName(m.model_id) }}</option>
+        </select>
+      </div>
+
+      <!-- Offline Model -->
+      <div class="flex items-center gap-1.5">
+        <label class="text-base-content/50 whitespace-nowrap">Offline:</label>
+        <select
+          v-model="store.asrConfig.active_offline_model"
+          class="select select-bordered select-sm min-w-[160px]"
+          @change="saveQuickSetting"
+        >
+          <option value="">(Auto)</option>
+          <option
+            v-for="m in installedOfflineModels"
+            :key="m.model_id"
+            :value="m.model_id"
+          >{{ displayName(m.model_id) }}</option>
+        </select>
+      </div>
+
+      <!-- Language -->
+      <div class="flex items-center gap-1.5">
+        <label class="text-base-content/50 whitespace-nowrap">Language:</label>
+        <select
+          v-model="store.asrConfig.language"
+          class="select select-bordered select-sm"
+          @change="saveQuickSetting"
+        >
+          <option v-for="lang in languages" :key="lang.value" :value="lang.value">
+            {{ lang.label }}
+          </option>
+        </select>
+      </div>
     </div>
 
     <!-- Drag overlay -->

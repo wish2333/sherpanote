@@ -1300,12 +1300,12 @@ onUnmounted(() => {
         <div class="card-body">
           <h2 class="card-title text-base">Available Models</h2>
           <p class="text-sm text-base-content/60">
-            Download ASR models for local speech recognition. VAD model is auto-downloaded with the first ASR model.
+            Download ASR models for local speech recognition. VAD model is auto-downloaded with the first ASR model, but can also be manually downloaded here.
           </p>
 
           <div class="mt-4 space-y-2">
             <div
-              v-for="model in availableModels.filter(m => m.model_type !== 'vad' && m.model_type !== 'tool')"
+              v-for="model in availableModels.filter(m => m.model_type !== 'tool')"
               :key="model.model_id"
               class="flex items-center justify-between rounded-lg border p-3"
               :class="isModelAvailableOnSource(model) ? 'border-base-300' : 'border-base-300 bg-base-200 opacity-60'"

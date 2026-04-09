@@ -184,6 +184,17 @@ MODELS: tuple[ModelEntry, ...] = (
         sources=("github", "huggingface", "hf_mirror", "ghproxy"),
     ),
     ModelEntry(
+        model_id="sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01",
+        display_name="Cohere Transcribe 14-Lang Int8",
+        model_type="offline",
+        languages=("ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"),
+        size_mb=2756,
+        archive_name="sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2",
+        description="Cohere Transcribe model supporting 14 languages (European + CJK + Arabic). High accuracy multilingual transcription.",
+        required_files=("tokens.txt", "encoder.int8.onnx", "decoder.int8.onnx"),
+        sources=("github", "huggingface", "hf_mirror", "ghproxy"),
+    ),
+    ModelEntry(
         model_id="sherpa-onnx-paraformer-zh-small-2024-03-09",
         display_name="Paraformer-Zh Small",
         model_type="offline",

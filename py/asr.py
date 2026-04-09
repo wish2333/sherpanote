@@ -684,13 +684,15 @@ class SherpaASR:
             embedding = self._find_file(model_dir, "embedding.int8.onnx", "embedding.onnx")
             tokenizer_dir = self._find_tokenizer_dir(model_dir)
             if encoder_adaptor and llm and embedding and tokenizer_dir:
-                logger.info("Using FunASR Nano offline model (dir: %s)", model_dir.name)
+                funasr_lang = self._config.language if self._config.language != "auto" else ""
+                logger.info("Using FunASR Nano offline model (dir: %s, lang: %s)", model_dir.name, funasr_lang or "auto-detect")
                 return sherpa_onnx.OfflineRecognizer.from_funasr_nano(
                     encoder_adaptor=str(encoder_adaptor),
                     llm=str(llm),
                     embedding=str(embedding),
                     tokenizer=str(tokenizer_dir),
                     num_threads=num_threads,
+                    language=funasr_lang,
                     provider=provider,
                 )
 
@@ -721,25 +723,55 @@ class SherpaASR:
         # Try SenseVoice model (only if directory name indicates SenseVoice).
         sense_voice_model = self._find_file(model_dir, "model.onnx", "model.int8.onnx")
         if is_sense_voice and sense_voice_model:
-            logger.info("Using SenseVoice offline model")
+            sv_lang = self._config.language if self._config.language != "auto" else ""
+            logger.info("Using SenseVoice offline model (lang: %s)", sv_lang or "auto-detect")
             return sherpa_onnx.OfflineRecognizer.from_sense_voice(
                 model=str(sense_voice_model),
                 tokens=str(tokens),
                 num_threads=num_threads,
+                language=sv_lang,
                 use_itn=True,
                 provider=provider,
             )
+
+        # Try Cohere Transcribe model (cohere-transcribe in dir name, encoder + decoder + tokens).
+        if "cohere-transcribe" in dir_name or "cohere_transcribe" in dir_name:
+            cohere_encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
+            cohere_decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
+            if cohere_encoder and cohere_decoder:
+                # Map config language to cohere-transcribe language code.
+                _COHERE_LANG_MAP = {
+                    "zh": "zh", "en": "en", "ja": "ja", "ko": "ko",
+                    "de": "de", "fr": "fr", "es": "es", "it": "it",
+                    "pt": "pt", "ar": "ar", "nl": "nl", "pl": "pl",
+                    "el": "el", "vi": "vi",
+                }
+                cohere_lang = _COHERE_LANG_MAP.get(self._config.language, "en")
+                logger.info("Using Cohere Transcribe offline model (dir: %s, lang: %s)", model_dir.name, cohere_lang)
+                return sherpa_onnx.OfflineRecognizer.from_cohere_transcribe(
+                    encoder=str(cohere_encoder),
+                    decoder=str(cohere_decoder),
+                    tokens=str(tokens),
+                    num_threads=num_threads,
+                    language=cohere_lang,
+                    provider=provider,
+                )
 
         # Fallback: try Whisper model.
         whisper_encoder = self._find_file(model_dir, "encoder.onnx")
         whisper_decoder = self._find_file(model_dir, "decoder.onnx")
         if whisper_encoder and whisper_decoder:
-            logger.info("Using Whisper offline model")
+            # Pass user-configured language so Whisper transcribes in the
+            # correct language instead of defaulting to English.
+            whisper_lang = self._config.language if self._config.language != "auto" else ""
+            logger.info("Using Whisper offline model (lang: %s)", whisper_lang or "auto-detect")
             return sherpa_onnx.OfflineRecognizer.from_whisper(
                 tokens=str(tokens),
                 encoder=str(whisper_encoder),
                 decoder=str(whisper_decoder),
                 num_threads=num_threads,
+                language=whisper_lang,
+                task="transcribe",
                 provider=provider,
             )
 

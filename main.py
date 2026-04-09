@@ -116,8 +116,10 @@ class SherpaNoteAPI(Bridge):
 
     # ---- ASR (Speech Recognition) ----
 
-    def _make_asr_config(self, language: str = "auto") -> AsrConfig:
+    def _make_asr_config(self, language: str | None = None) -> AsrConfig:
         """Build an AsrConfig from the current persisted config."""
+        if language is None:
+            language = self._config.asr.language or "auto"
         return AsrConfig(
             model_dir=self._config.asr.model_dir,
             language=language,
@@ -133,7 +135,7 @@ class SherpaNoteAPI(Bridge):
         )
 
     @expose
-    def init_model(self, language: str = "auto") -> dict:
+    def init_model(self, language: str | None = None) -> dict:
         """Initialize sherpa-onnx ASR model. Language: zh / en / auto.
 
         Runs model loading in a background thread. The frontend should
