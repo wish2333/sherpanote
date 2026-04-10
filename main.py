@@ -64,6 +64,9 @@ class SherpaNoteAPI(Bridge):
         )
         # Track record IDs with unsaved changes for exit-time versioning.
         self._dirty_record_ids: set[str] = set()
+        # Track how many final segments have been emitted to the frontend
+        # during the current streaming session (used for both true and simulated streaming).
+        self._last_emitted_final_count: int = 0
 
     def dispatch_task(self, command: str, args: Any) -> Any:
         """Dispatch commands for run_on_main_thread.
@@ -80,16 +83,27 @@ class SherpaNoteAPI(Bridge):
             if self._asr._online_recognizer is not None:
                 logger.info("Online recognizer already exists, skipping")
                 return True
+            if self._asr._is_simulated_streaming:
+                logger.info("Simulated streaming recognizer already exists, skipping")
+                return True
             model_dir = self._asr._find_streaming_model()
             if model_dir is None:
                 raise FileNotFoundError(
                     "No streaming ASR model found. "
                     f"Please download a model and place it in {self._asr._model_dir()}"
                 )
-            recognizer = self._asr._create_online_recognizer(sherpa_onnx, model_dir)
-            # CRITICAL: Assign the recognizer to the ASR instance
-            self._asr._online_recognizer = recognizer
-            logger.info("Online recognizer created on main thread and assigned")
+            # Detect simulated streaming (SenseVoice) before creating recognizer.
+            if self._asr._is_simulated_streaming_model(model_dir):
+                logger.info("Detected simulated streaming model: %s", model_dir.name)
+                self._asr._is_simulated_streaming = True
+                self._asr._simulated_vad = self._asr._create_vad(sherpa_onnx, buffer_seconds=600, streaming=True)
+                offline_rec = self._asr._create_offline_recognizer(sherpa_onnx, model_dir)
+                self._asr._simulated_offline_recognizer = offline_rec
+                logger.info("Simulated streaming setup complete (VAD + offline recognizer)")
+            else:
+                recognizer = self._asr._create_online_recognizer(sherpa_onnx, model_dir)
+                self._asr._online_recognizer = recognizer
+                logger.info("Online recognizer created on main thread and assigned")
             return True
 
         elif command == "create_offline_recognizer":
@@ -132,6 +146,13 @@ class SherpaNoteAPI(Bridge):
             custom_ghproxy_domain=self._config.asr.custom_ghproxy_domain,
             proxy_mode=self._config.asr.proxy_mode,
             proxy_url=self._config.asr.proxy_url,
+            vad_min_silence_duration=self._config.asr.vad_min_silence_duration,
+            vad_min_speech_duration=self._config.asr.vad_min_speech_duration,
+            vad_max_speech_duration=self._config.asr.vad_max_speech_duration,
+            vad_threshold=self._config.asr.vad_threshold,
+            offline_use_vad=self._config.asr.offline_use_vad,
+            vad_padding=self._config.asr.vad_padding,
+            active_vad_model=self._config.asr.active_vad_model,
         )
 
     @expose
@@ -171,17 +192,24 @@ class SherpaNoteAPI(Bridge):
             logger.info("Background thread started for start_streaming")
             logger.info("_asr: %s, _online_recognizer: %s", self._asr, getattr(self._asr, '_online_recognizer', 'N/A'))
             try:
-                # Ensure online recognizer is created on main thread
-                if self._asr._online_recognizer is None:
-                    logger.info("_online_recognizer is None, will create on main thread")
-                    # This blocks until the main thread executes the task
+                # Ensure recognizer is created on main thread
+                needs_creation = (
+                    self._asr._online_recognizer is None
+                    and not self._asr._is_simulated_streaming
+                ) or (
+                    self._asr._is_simulated_streaming
+                    and self._asr._simulated_offline_recognizer is None
+                )
+                if needs_creation:
+                    logger.info("Recognizer not yet created, will create on main thread")
                     self.run_on_main_thread("create_online_recognizer", timeout=60.0)
-                    logger.info("Online recognizer creation completed")
+                    logger.info("Recognizer creation completed")
                 else:
-                    logger.info("_online_recognizer already exists, skipping creation")
+                    logger.info("Recognizer already exists, skipping creation")
 
                 # Now create the stream and start recording (safe on background thread)
                 result = self._asr.start_streaming()
+                self._last_emitted_final_count = 0
                 logger.info("start_streaming completed, emitting streaming_ready: %s", result)
                 self._emit("streaming_ready", result)
             except Exception as exc:
@@ -203,11 +231,13 @@ class SherpaNoteAPI(Bridge):
             # Emit partial (in-progress) text.
             if result.get("partial"):
                 self._emit("partial_result", {"text": result["partial"]})
-            # Emit newly finalized segments (when endpoint detected).
-            prev_count = len(self._asr._final_segments) - (1 if result.get("partial") else 0)
-            for seg in result.get("final", []):
-                if seg.get("index", 0) >= prev_count:
-                    self._emit("final_result", {"text": seg["text"], "timestamp": []})
+            # Emit newly finalized segments using a tracked count.
+            # This works for both true streaming and simulated streaming (VAD + offline).
+            current_count = len(self._asr._final_segments)
+            for i in range(self._last_emitted_final_count, current_count):
+                seg = self._asr._final_segments[i]
+                self._emit("final_result", {"text": seg["text"], "timestamp": []})
+            self._last_emitted_final_count = current_count
             return {"success": True, "data": {"length": len(base64_data)}}
         except Exception as e:
             import traceback
@@ -458,6 +488,9 @@ class SherpaNoteAPI(Bridge):
                 record["can_retranscribe"] = False
         else:
             record["can_retranscribe"] = False
+        # Annotate with current version number from versions table.
+        if "version" not in record or not record.get("version"):
+            record["version"] = self._storage._get_current_version(record["id"])
         return record
 
     @expose

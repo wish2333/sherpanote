@@ -46,22 +46,28 @@ const availableModels = ref<ModelEntry[]>([]);
 const installedModels = ref<InstalledModel[]>([]);
 
 const languages = [
-  { value: "auto", label: "Auto" },
-  { value: "zh", label: "Chinese" },
-  { value: "en", label: "English" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "yue", label: "Cantonese" },
-  { value: "de", label: "German" },
-  { value: "fr", label: "French" },
-  { value: "es", label: "Spanish" },
-  { value: "ru", label: "Russian" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
+  { value: "auto", label: "自动检测" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英语" },
+  { value: "ja", label: "日语" },
+  { value: "ko", label: "韩语" },
+  { value: "yue", label: "粤语" },
+  { value: "de", label: "德语" },
+  { value: "fr", label: "法语" },
+  { value: "es", label: "西班牙语" },
+  { value: "ru", label: "俄语" },
+  { value: "it", label: "意大利语" },
+  { value: "pt", label: "葡萄牙语" },
 ];
 
 const installedStreamingModels = computed(() =>
-  installedModels.value.filter((m) => m.model_type === "streaming"),
+  installedModels.value.filter(
+    (m) =>
+      m.model_type === "streaming" ||
+      // SenseVoice and Qwen3-ASR models support simulated streaming via VAD + offline recognizer.
+      m.model_id.includes("sense-voice") || m.model_id.includes("sensevoice") ||
+      m.model_id.includes("qwen3-asr"),
+  ),
 );
 
 const installedOfflineModels = computed(() =>
@@ -241,10 +247,10 @@ onUnmounted(() => {
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 18l-6-6 6-6" />
         </svg>
-        Back
+        返回
       </button>
       <h1 class="text-xl font-bold tracking-tight text-base-content">
-        {{ isRecording ? "Recording..." : "New Recording" }}
+        {{ isRecording ? "录音中..." : "新建录音" }}
       </h1>
     </div>
 
@@ -255,13 +261,13 @@ onUnmounted(() => {
     >
       <!-- Streaming Model -->
       <div class="flex items-center gap-1.5">
-        <label class="text-base-content/50 whitespace-nowrap">Streaming:</label>
+        <label class="text-base-content/50 whitespace-nowrap">流式模型:</label>
         <select
           v-model="store.asrConfig.active_streaming_model"
           class="select select-bordered select-sm min-w-[160px]"
           @change="saveQuickSetting"
         >
-          <option value="">(Auto)</option>
+          <option value="">(自动)</option>
           <option
             v-for="m in installedStreamingModels"
             :key="m.model_id"
@@ -272,13 +278,13 @@ onUnmounted(() => {
 
       <!-- Offline Model -->
       <div class="flex items-center gap-1.5">
-        <label class="text-base-content/50 whitespace-nowrap">Offline:</label>
+        <label class="text-base-content/50 whitespace-nowrap">离线模型:</label>
         <select
           v-model="store.asrConfig.active_offline_model"
           class="select select-bordered select-sm min-w-[160px]"
           @change="saveQuickSetting"
         >
-          <option value="">(Auto)</option>
+          <option value="">(自动)</option>
           <option
             v-for="m in installedOfflineModels"
             :key="m.model_id"
@@ -289,7 +295,7 @@ onUnmounted(() => {
 
       <!-- Language -->
       <div class="flex items-center gap-1.5">
-        <label class="text-base-content/50 whitespace-nowrap">Language:</label>
+        <label class="text-base-content/50 whitespace-nowrap">语言:</label>
         <select
           v-model="store.asrConfig.language"
           class="select select-bordered select-sm"
@@ -307,7 +313,7 @@ onUnmounted(() => {
       v-if="isDraggingFile"
       class="mb-4 rounded-lg border-2 border-dashed border-primary bg-primary/5 p-6 text-center"
     >
-      <p class="text-primary font-medium">Drop audio file to transcribe</p>
+      <p class="text-primary font-medium">拖放音频文件以转写</p>
     </div>
 
     <!-- Recording controls -->
@@ -330,7 +336,7 @@ onUnmounted(() => {
       <!-- Progress bar shown during import -->
       <div v-if="isImporting" class="p-4">
         <div class="mb-2 flex items-center justify-between text-sm">
-          <span>Importing & Transcribing...</span>
+          <span>导入并转写中...</span>
           <span>{{ importProgress }}%</span>
         </div>
         <progress class="progress progress-primary w-full" :value="importProgress" max="100"></progress>
@@ -338,7 +344,7 @@ onUnmounted(() => {
 
       <!-- Drag overlay text -->
       <div v-else-if="isDraggingImport" class="p-6 text-center">
-        <p class="text-secondary font-medium">Drop audio file to import & transcribe</p>
+        <p class="text-secondary font-medium">拖放音频文件以导入并转写</p>
       </div>
 
       <!-- Default idle state -->
@@ -349,14 +355,14 @@ onUnmounted(() => {
             <polyline points="17 8 12 3 7 8" />
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          <span>Drag audio file here, or</span>
+          <span>拖放音频文件到此处，或</span>
         </div>
         <button
           v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
           class="btn btn-secondary btn-sm"
           @click="handleImportAndTranscribe"
         >
-          Import & Transcribe
+          导入并转写
         </button>
       </div>
     </div>
@@ -380,8 +386,8 @@ onUnmounted(() => {
         <line x1="12" y1="19" x2="12" y2="23" />
         <line x1="8" y1="23" x2="16" y2="23" />
       </svg>
-      <p class="mb-1 text-lg font-medium">Ready to Record</p>
-      <p class="text-sm">Click "Start Recording" or upload an audio file to begin.</p>
+      <p class="mb-1 text-lg font-medium">准备录音</p>
+      <p class="text-sm">点击"开始录音"或上传音频文件开始。</p>
     </div>
   </div>
 </template>

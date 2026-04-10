@@ -49,7 +49,7 @@ function hasAiResults(record: TranscriptRecord): boolean {
       <div class="flex items-center justify-between">
         <div class="min-w-0 flex-1">
           <h3 class="card-title text-base truncate">
-            {{ record.title || "Untitled" }}
+            {{ record.title || "无标题" }}
           </h3>
           <div class="mt-1 flex items-center gap-3 text-sm text-base-content/60">
             <span v-if="record.duration_seconds > 0">
@@ -83,7 +83,7 @@ function hasAiResults(record: TranscriptRecord): boolean {
           </span>
           <button
             class="btn btn-ghost btn-xs"
-            title="Delete"
+            title="删除"
             @click="emit('delete')"
           >
             <svg class="h-4 w-4 text-base-content/40 hover:text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

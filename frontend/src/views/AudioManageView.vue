@@ -148,10 +148,10 @@ onBeforeUnmount(() => {
     <!-- Header -->
     <div class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold tracking-tight text-base-content">
-        Audio Files
+        音频文件
       </h1>
       <button class="btn btn-outline btn-sm" @click="handleOpenFolder">
-        Open Folder
+        打开文件夹
       </button>
     </div>
 
@@ -170,8 +170,8 @@ onBeforeUnmount(() => {
         <circle cx="6" cy="18" r="3" />
         <circle cx="18" cy="15" r="3" />
       </svg>
-      <p class="mb-1 text-lg">No audio files</p>
-      <p class="text-sm">Audio files from recordings and imports will appear here.</p>
+      <p class="mb-1 text-lg">暂无音频文件</p>
+      <p class="text-sm">录音和导入的音频文件会显示在这里。</p>
     </div>
 
     <!-- Audio file list -->
@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
               </div>
               <!-- Linked records -->
               <div v-if="file.linked_records.length > 0" class="mt-2">
-                <span class="text-xs text-base-content/40">Linked to:</span>
+                <span class="text-xs text-base-content/40">关联记录:</span>
                 <div class="flex flex-wrap gap-1 mt-1">
                   <button
                     v-for="rec in file.linked_records"
@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div v-else class="mt-2">
-                <span class="badge badge-ghost badge-sm">No linked record</span>
+                <span class="badge badge-ghost badge-sm">无关联记录</span>
               </div>
             </div>
             <div class="flex items-center gap-1 ml-4">
@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
                 class="btn btn-ghost btn-xs"
                 :class="{ 'loading': transcribingPath === file.file_path }"
                 :disabled="!!transcribingPath"
-                title="Transcribe this audio file"
+                title="转写此音频文件"
                 @click="handleTranscribe(file.file_path)"
               >
                 <svg class="h-4 w-4 text-base-content/40 hover:text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -231,7 +231,7 @@ onBeforeUnmount(() => {
               <!-- Delete button -->
               <button
                 class="btn btn-ghost btn-xs"
-                title="Delete audio file"
+                title="删除音频文件"
                 @click="handleDelete(file.file_path)"
               >
                 <svg class="h-4 w-4 text-base-content/40 hover:text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -251,14 +251,13 @@ onBeforeUnmount(() => {
     <!-- Delete confirmation modal -->
     <dialog id="delete-audio-modal" class="modal">
       <div class="modal-box">
-        <h3 class="text-lg font-bold">Delete Audio File</h3>
+        <h3 class="text-lg font-bold">删除音频文件</h3>
         <p class="py-4 text-sm">
-          Are you sure you want to delete this audio file? This action cannot be undone.
-          Any records linked to this file will lose their audio.
+          确定要删除此音频文件吗？此操作不可撤销。关联此文件的记录将失去音频。
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost btn-sm" @click="cancelDelete">Cancel</button>
-          <button class="btn btn-error btn-sm" @click="confirmDelete">Delete</button>
+          <button class="btn btn-ghost btn-sm" @click="cancelDelete">取消</button>
+          <button class="btn btn-error btn-sm" @click="confirmDelete">删除</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="cancelDelete">

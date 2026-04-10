@@ -302,7 +302,7 @@ def extract_archive(
     models_dir.mkdir(parents=True, exist_ok=True)
 
     if is_vad:
-        dest = models_dir / "silero_vad.onnx"
+        dest = models_dir / (model_id + ".onnx")
         shutil.copy2(archive_path, dest)
         logger.info("VAD model installed to %s", dest)
         return dest
@@ -354,11 +354,11 @@ def validate_model(model_id: str, models_dir: Path) -> dict[str, Any]:
     entry = get_model(model_id)
 
     if entry is None or entry.model_type == "vad":
-        if model_id == "silero_vad":
-            vad_file = Path(models_dir) / "silero_vad.onnx"
+        if model_id in ("silero_vad", "silero_vad_v5"):
+            vad_file = Path(models_dir) / (model_id + ".onnx")
             if vad_file.exists():
                 return {"valid": True}
-            return {"valid": False, "missing": ["silero_vad.onnx"]}
+            return {"valid": False, "missing": [model_id + ".onnx"]}
         # Unknown model -- check if it has model files.
         model_dir = Path(models_dir) / model_id
         if model_dir.is_dir():
@@ -465,16 +465,17 @@ def list_installed_models(models_dir: Path) -> list[dict[str, Any]]:
     # Collect known model IDs for lookup.
     known_ids = {m.model_id: m for m in MODELS}
 
-    # Check for VAD model.
-    vad_file = models_dir / "silero_vad.onnx"
-    if vad_file.exists():
-        size = vad_file.stat().st_size / (1024 * 1024)
-        result.append({
-            "model_id": "silero_vad",
-            "valid": True,
-            "size_mb": round(size, 1),
-            "model_type": "vad",
-        })
+    # Check for VAD models (v4 and v5).
+    for vad_id in ("silero_vad", "silero_vad_v5"):
+        vad_file = models_dir / (vad_id + ".onnx")
+        if vad_file.exists():
+            size = vad_file.stat().st_size / (1024 * 1024)
+            result.append({
+                "model_id": vad_id,
+                "valid": True,
+                "size_mb": round(size, 1),
+                "model_type": "vad",
+            })
 
     # Scan subdirectories for installed models.
     if models_dir.is_dir():
@@ -509,12 +510,12 @@ def delete_model(model_id: str, models_dir: Path) -> dict[str, Any]:
     """Delete an installed model directory or VAD file."""
     models_dir = Path(models_dir)
 
-    if model_id == "silero_vad":
-        vad_file = models_dir / "silero_vad.onnx"
+    if model_id in ("silero_vad", "silero_vad_v5"):
+        vad_file = models_dir / (model_id + ".onnx")
         if not vad_file.exists():
             return {"success": False, "error": "VAD model not found"}
         vad_file.unlink()
-        logger.info("VAD model deleted")
+        logger.info("VAD model deleted: %s", model_id)
         return {"success": True, "model_id": model_id}
 
     model_dir = models_dir / model_id
@@ -677,9 +678,10 @@ class ModelInstaller:
 
             # 5. Auto-download VAD if this is the first ASR model install.
             if not is_vad:
-                vad_path = models_dir / "silero_vad.onnx"
+                vad_id = "silero_vad_v5"
+                vad_path = models_dir / (vad_id + ".onnx")
                 if not vad_path.exists():
-                    vad_entry = get_model("silero_vad")
+                    vad_entry = get_model(vad_id)
                     if vad_entry and self._download_source in vad_entry.sources:
                         vad_tmp = models_dir / "_silero_vad_download.tmp"
                         self._emit_progress("download", 100, sub_phase="vad")
@@ -690,7 +692,7 @@ class ModelInstaller:
                             proxy_url=self._proxy_url,
                             cancel_event=self._cancel,
                         )
-                        extract_archive(vad_tmp, "silero_vad", models_dir, is_vad=True)
+                        extract_archive(vad_tmp, vad_id, models_dir, is_vad=True)
                         if vad_tmp.exists():
                             vad_tmp.unlink()
 

@@ -151,13 +151,13 @@ onMounted(async () => {
     <!-- Header -->
     <div class="mb-6 flex items-center justify-between">
       <h1 class="text-2xl font-bold tracking-tight text-base-content">
-        Records
+        记录
       </h1>
       <button class="btn btn-primary btn-sm" @click="newRecord">
-        + New Record
+        + 新建记录
       </button>
       <button class="btn btn-outline btn-sm" @click="triggerTextImport">
-        Import Text
+        导入文本
       </button>
       <!-- Hidden file input for text import -->
       <input
@@ -177,7 +177,7 @@ onMounted(async () => {
       v-if="isDraggingOver"
       class="mb-4 rounded-lg border-2 border-dashed border-primary bg-primary/5 p-8 text-center"
     >
-      <p class="text-primary font-medium">Drop audio file here to transcribe</p>
+      <p class="text-primary font-medium">拖放音频文件到此处以转写</p>
     </div>
 
     <!-- Loading state -->
@@ -193,8 +193,8 @@ onMounted(async () => {
       <svg class="mb-3 h-12 w-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
-      <p class="mb-1 text-lg">No records yet</p>
-      <p class="text-sm">Click "New Record" to start recording or drag an audio file here.</p>
+      <p class="mb-1 text-lg">暂无记录</p>
+      <p class="text-sm">点击"新建记录"开始录音，或拖放音频文件到此处。</p>
     </div>
 
     <!-- Record list -->
@@ -211,13 +211,13 @@ onMounted(async () => {
     <!-- Delete confirmation modal -->
     <dialog id="delete-confirm-modal" class="modal">
       <div class="modal-box">
-        <h3 class="text-lg font-bold">Delete Record</h3>
+        <h3 class="text-lg font-bold">删除记录</h3>
         <p class="py-4 text-sm">
-          Are you sure you want to delete this record? This action cannot be undone.
+          确定要删除这条记录吗？此操作不可撤销。
         </p>
         <div class="modal-action">
-          <button class="btn btn-ghost btn-sm" @click="cancelDelete">Cancel</button>
-          <button class="btn btn-error btn-sm" @click="confirmDelete">Delete</button>
+          <button class="btn btn-ghost btn-sm" @click="cancelDelete">取消</button>
+          <button class="btn btn-error btn-sm" @click="confirmDelete">删除</button>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop" @click="cancelDelete">

@@ -50,7 +50,7 @@ function formatTimestamp(timestamp: number[]): string {
     ref="panelRef"
     class="rounded-lg border border-base-300 bg-base-100 p-4 max-h-[60vh] overflow-y-auto"
   >
-    <h2 class="mb-3 text-sm font-semibold text-base-content/60">Live Transcript</h2>
+    <h2 class="mb-3 text-sm font-semibold text-base-content/60">实时转写</h2>
     <div class="space-y-1 text-base leading-relaxed text-base-content">
       <p
         v-for="(seg, i) in segments"

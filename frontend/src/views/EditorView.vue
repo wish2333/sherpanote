@@ -507,7 +507,7 @@ onBeforeUnmount(async () => {
             <line x1="12" y1="19" x2="12" y2="23" />
             <line x1="8" y1="23" x2="16" y2="23" />
           </svg>
-          {{ isRetranscribing ? "Transcribing..." : "Re-transcribe" }}
+          {{ isRetranscribing ? "转写中..." : "重新转写" }}
         </button>
         <span
           v-if="saveStatus !== 'idle'"
@@ -518,11 +518,11 @@ onBeforeUnmount(async () => {
             'badge-success': saveStatus === 'saved',
           }"
         >
-          {{ saveStatus === "saved" ? "Saved" : saveStatus === "saving" ? "Saving..." : "Unsaved" }}
+          {{ saveStatus === "saved" ? "已保存" : saveStatus === "saving" ? "保存中..." : "未保存" }}
         </span>
         <button
           class="btn btn-ghost btn-sm btn-circle relative"
-          title="Version History"
+          title="版本历史"
           @click="showVersionHistory = !showVersionHistory"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -554,7 +554,7 @@ onBeforeUnmount(async () => {
           class="select select-bordered select-xs"
           @change="onCategoryChange"
         >
-          <option value="">No category</option>
+          <option value="">无分类</option>
           <option v-for="cat in availableCategories.filter(c => c)" :key="cat" :value="cat">
             {{ cat }}
           </option>
@@ -575,7 +575,7 @@ onBeforeUnmount(async () => {
           <input
             v-model="newTag"
             class="input input-bordered input-xs w-24"
-            placeholder="Add tag..."
+            placeholder="添加标签..."
             @keydown.enter.prevent="addTag"
           />
         </div>
@@ -590,7 +590,7 @@ onBeforeUnmount(async () => {
           class="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-base-content/70 hover:bg-base-300 transition-colors"
           @click="showAudio = !showAudio"
         >
-          <span>Audio Player</span>
+          <span>音频播放器</span>
           <svg
             class="h-4 w-4 transition-transform"
             :class="{ 'rotate-180': showAudio }"
@@ -708,15 +708,15 @@ onBeforeUnmount(async () => {
                 >
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
-                <span>Transcript</span>
+                <span>转写文本</span>
                 <span v-if="editorText.length > 0" class="text-xs opacity-40 ml-1">
-                  {{ editorText.length }} chars
+                  {{ editorText.length }} 字
                 </span>
               </div>
               <button
                 class="btn btn-primary btn-sm"
                 :disabled="isSavingVersion"
-                title="Save current state as a version snapshot"
+                title="保存当前状态为版本快照"
                 @click.stop="handleSaveVersion"
               >
                 <span v-if="isSavingVersion" class="loading loading-spinner loading-xs"></span>
@@ -725,11 +725,11 @@ onBeforeUnmount(async () => {
                   <polyline points="17 21 17 13 7 13 7 21" />
                   <polyline points="7 3 7 8 15 8" />
                 </svg>
-                Save Version
+                保存版本
               </button>
               <button
                 class="btn btn-ghost btn-xs"
-                title="Copy transcript"
+                title="复制转写文本"
                 @click.stop="copyTranscript"
               >
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -755,7 +755,7 @@ onBeforeUnmount(async () => {
                   class="flex items-center justify-between w-full px-3 py-2 text-xs font-medium text-base-content/60 hover:bg-base-200 transition-colors"
                   @click="showSegments = !showSegments"
                 >
-                  <span>Timestamped Segments</span>
+                  <span>时间戳分段</span>
                   <svg
                     class="h-3.5 w-3.5 transition-transform"
                     :class="{ 'rotate-180': showSegments }"
@@ -790,7 +790,7 @@ onBeforeUnmount(async () => {
               <textarea
                 v-model="editorText"
                 class="textarea textarea-ghost w-full min-h-[30vh] text-base leading-relaxed resize-none px-4 pb-4"
-                placeholder="Transcript will appear here..."
+                placeholder="转写文本将在此处显示..."
               ></textarea>
             </div>
           </div>
@@ -804,13 +804,13 @@ onBeforeUnmount(async () => {
             <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
               <div class="flex items-center gap-2">
                 <h2 class="text-sm font-semibold text-base-content/70">
-                  <span class="capitalize">{{ activeResultMode || 'AI Result' }}</span>
+                  <span>{{ activeResultMode || 'AI 结果' }}</span>
                 </h2>
                 <span v-if="isAiProcessing" class="loading loading-dots loading-xs text-primary"></span>
                 <span
                   v-if="truncationWarning"
                   class="badge badge-warning badge-xs"
-                >Truncated</span>
+                >已截断</span>
               </div>
               <div v-if="currentResultContent && !isAiProcessing" class="flex gap-1">
                 <button
@@ -818,24 +818,24 @@ onBeforeUnmount(async () => {
                   class="btn btn-ghost btn-xs"
                   :class="showMindMap ? 'btn-active' : ''"
                   @click="showMindMap = !showMindMap"
-                  title="Toggle mind map view"
-                >Map</button>
+                  title="切换思维导图"
+                >导图</button>
                 <button
                   v-if="truncationWarning"
                   class="btn btn-warning btn-outline btn-xs"
-                  title="Continue generating"
+                  title="继续生成"
                   @click="handleContinueOutput"
-                >Continue</button>
+                >继续</button>
                 <button
                   class="btn btn-ghost btn-xs"
-                  title="Save to record"
+                  title="保存到记录"
                   @click="handleSaveResult"
-                >Save</button>
+                >保存</button>
                 <button
                   class="btn btn-ghost btn-xs"
-                  title="Copy to clipboard"
+                  title="复制到剪贴板"
                   @click="handleCopyResult"
-                >Copy</button>
+                >复制</button>
               </div>
             </div>
 

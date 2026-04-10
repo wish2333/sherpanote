@@ -44,6 +44,7 @@ export interface Version {
   record_id: string;
   version: number;
   transcript: string;
+  segments: Segment[];
   ai_results: AiResults;
   created_at: string;
 }
@@ -71,6 +72,13 @@ export interface AsrConfig {
   custom_ghproxy_domain: string | null;
   proxy_mode: string;
   proxy_url: string | null;
+  vad_min_silence_duration: number;
+  vad_min_speech_duration: number;
+  vad_max_speech_duration: number;
+  vad_threshold: number;
+  offline_use_vad: boolean;
+  vad_padding: number;
+  active_vad_model: string;
 }
 
 /** AI processing modes. */

@@ -61,6 +61,7 @@ class Storage:
                 record_id       TEXT NOT NULL,
                 version         INTEGER NOT NULL,
                 transcript      TEXT NOT NULL,
+                segments_json   TEXT NOT NULL DEFAULT '[]',
                 ai_results_json TEXT NOT NULL DEFAULT '{}',
                 created_at      TEXT NOT NULL,
                 PRIMARY KEY (record_id, version)
@@ -76,7 +77,17 @@ class Storage:
 
             CREATE INDEX IF NOT EXISTS idx_records_title
                 ON records(title);
+
+            -- Migration: add segments_json to versions table if missing
         """)
+        # Migration: add segments_json column to versions table for older databases
+        try:
+            self._get_conn().execute(
+                "ALTER TABLE versions ADD COLUMN segments_json TEXT NOT NULL DEFAULT '[]'"
+            )
+            self._get_conn().commit()
+        except Exception:
+            pass  # Column already exists
         conn.commit()
 
     # ---- Record CRUD ----
@@ -211,8 +222,8 @@ class Storage:
         new_version = current + 1
 
         conn.execute(
-            "INSERT OR REPLACE INTO versions (record_id, version, transcript, ai_results_json, created_at) VALUES (?, ?, ?, ?, ?)",
-            (record_id, new_version, record["transcript"], record["ai_results_json"], now),
+            "INSERT OR REPLACE INTO versions (record_id, version, transcript, segments_json, ai_results_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (record_id, new_version, record["transcript"], record.get("segments_json", "[]"), record["ai_results_json"], now),
         )
         conn.commit()
 
@@ -258,7 +269,10 @@ class Storage:
             return None
 
         record["transcript"] = old["transcript"]
+        record["segments_json"] = old.get("segments_json", "[]")
+        record["segments"] = old.get("segments", [])
         record["ai_results_json"] = old["ai_results_json"]
+        record["ai_results"] = old["ai_results"]
         return self.save(record)
 
     # ---- Export ----

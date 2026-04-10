@@ -55,7 +55,7 @@ function onCategoryChange() {
     <input
       v-model="keyword"
       type="text"
-      placeholder="Search records..."
+      placeholder="搜索记录..."
       class="input input-bordered input-sm flex-1"
       @input="emitSearch"
     />
@@ -64,7 +64,7 @@ function onCategoryChange() {
       class="select select-bordered select-sm w-32"
       @change="onCategoryChange"
     >
-      <option value="">All</option>
+      <option value="">全部</option>
       <option v-for="cat in categories" :key="cat" :value="cat">
         {{ cat }}
       </option>

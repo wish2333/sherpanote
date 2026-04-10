@@ -87,7 +87,7 @@ onMounted(loadVersions);
 
 <template>
   <div class="rounded-lg border border-base-300 bg-base-100 p-4">
-    <h2 class="mb-3 text-sm font-semibold text-base-content/60">Version History</h2>
+    <h2 class="mb-3 text-sm font-semibold text-base-content/60">版本历史</h2>
 
     <!-- Loading -->
     <div v-if="isLoading" class="flex justify-center py-4">
@@ -96,7 +96,7 @@ onMounted(loadVersions);
 
     <!-- Empty -->
     <p v-else-if="sortedVersions.length === 0" class="text-sm text-base-content/40">
-      No version history yet. Click "Save Version" to create a snapshot.
+      暂无版本历史。点击"保存版本"创建快照。
     </p>
 
     <!-- Version list -->
@@ -112,14 +112,14 @@ onMounted(loadVersions);
             v{{ ver.version }}
           </span>
           <span v-if="ver.version === currentVersion" class="badge badge-primary badge-xs ml-1">
-            current
+            当前
           </span>
           <div class="text-xs text-base-content/40">
             {{ formatDate(ver.created_at) }}
           </div>
           <!-- Text preview for quick comparison -->
           <div class="mt-1 text-xs text-base-content/30 truncate max-w-[200px]" :title="ver.transcript">
-            {{ ver.transcript ? ver.transcript.slice(0, 80) : '(empty)' }}{{ ver.transcript && ver.transcript.length > 80 ? '...' : '' }}
+            {{ ver.transcript ? ver.transcript.slice(0, 80) : '(空)' }}{{ ver.transcript && ver.transcript.length > 80 ? '...' : '' }}
           </div>
         </div>
         <div class="flex items-center gap-1 shrink-0 ml-2">
@@ -129,11 +129,11 @@ onMounted(loadVersions);
             :disabled="isRestoring"
             @click="handleRestore(ver.version)"
           >
-            Restore
+            恢复
           </button>
           <button
             class="btn btn-ghost btn-xs text-error"
-            title="Delete this version"
+            title="删除此版本"
             @click="handleDelete(ver.version)"
           >
             <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -153,10 +153,10 @@ onMounted(loadVersions);
       class="modal modal-open"
     >
       <div class="modal-box">
-        <h3 class="text-lg font-bold">Confirm Restore</h3>
+        <h3 class="text-lg font-bold">确认恢复</h3>
         <p class="py-4 text-sm">
-          Restore this record to version <strong>{{ confirmRestoreVersion }}</strong>?
-          This will create a new version with the restored content.
+          将此记录恢复到版本 <strong>{{ confirmRestoreVersion }}</strong>？
+          恢复内容将保存为新版本。
         </p>
         <div class="modal-action">
           <button
@@ -164,7 +164,7 @@ onMounted(loadVersions);
             :disabled="isRestoring"
             @click="cancelRestore"
           >
-            Cancel
+            取消
           </button>
           <button
             class="btn btn-primary btn-sm"
@@ -172,7 +172,7 @@ onMounted(loadVersions);
             @click="confirmRestore"
           >
             <span v-if="isRestoring" class="loading loading-spinner loading-xs"></span>
-            Restore
+            恢复
           </button>
         </div>
       </div>

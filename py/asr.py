@@ -52,15 +52,43 @@ class SherpaASR:
         self._offline_recognizer: Any = None
         self._lock = threading.Lock()
         self._is_streaming = False
+        self._is_simulated_streaming = False
         self._final_segments: list[dict[str, Any]] = []
         self._partial_text = ""
         self._segment_index = 0
         self._stream_start_time = 0.0
         self._pcm_recorder: PcmRecorder | None = None
+        # Simulated streaming (VAD + offline recognizer) state.
+        self._simulated_vad: Any = None
+        self._simulated_offline_recognizer: Any = None
+        self._simulated_audio_buffer: np.ndarray | None = None
 
     @property
     def is_streaming(self) -> bool:
         return self._is_streaming
+
+    @staticmethod
+    def _is_simulated_streaming_model(model_dir: Path) -> bool:
+        """Check if a model supports simulated streaming (VAD + offline recognition).
+
+        SenseVoice and Qwen3-ASR models are offline-only but can be used for
+        near-real-time speech recognition by combining VAD with the offline recognizer.
+        """
+        dir_name = model_dir.name.lower()
+        if "sense-voice" in dir_name or "sensevoice" in dir_name:
+            return True
+        if "qwen3-asr" in dir_name or "qwen3_asr" in dir_name:
+            return True
+        # Fallback: detect by characteristic file.
+        if (model_dir / "conv_frontend.onnx").exists():
+            return True
+        return False
+
+    @staticmethod
+    def _is_sense_voice_dir(model_dir: Path) -> bool:
+        """Check if a model directory is a SenseVoice model (used for offline detection)."""
+        dir_name = model_dir.name.lower()
+        return "sense-voice" in dir_name or "sensevoice" in dir_name
 
     # ---- Model file helpers ----
 
@@ -309,33 +337,46 @@ class SherpaASR:
     # ---- Streaming (OnlineRecognizer) ----
 
     def start_streaming(self) -> dict[str, Any]:
-        """Initialize streaming session. Assumes recognizer already created.
+        """Initialize streaming session.
 
-        The online recognizer must have been created on the main thread
-        via _create_online_recognizer before calling this method.
+        Supports two modes:
+        - True streaming: uses OnlineRecognizer (Paraformer, Zipformer)
+        - Simulated streaming: uses VAD + OfflineRecognizer (SenseVoice)
+
+        The recognizer must have been created on the main thread before calling.
 
         Returns:
             dict with 'status' and 'language'.
         """
-        # The recognizer should already exist (created on main thread)
-        if self._online_recognizer is None:
+        if not self._is_simulated_streaming and self._online_recognizer is None:
             raise RuntimeError("Online recognizer not initialized. Must be created on main thread first.")
+        if self._is_simulated_streaming and self._simulated_offline_recognizer is None:
+            raise RuntimeError("Simulated streaming recognizer not initialized. Must be created on main thread first.")
 
-        # Use lock to protect state modifications (stream creation, flags, recorder)
         with self._lock:
-            # Create a fresh stream for each recording session.
-            self._online_stream = self._online_recognizer.create_stream()
-            self._is_streaming = True
             self._final_segments = []
             self._partial_text = ""
             self._segment_index = 0
             self._stream_start_time = 0.0
+            self._is_streaming = True
 
             # Start recording PCM audio for later playback.
             from py.config import _DEFAULT_DATA_DIR
             audio_dir = str(Path(_DEFAULT_DATA_DIR) / "audio")
             self._pcm_recorder = PcmRecorder(sample_rate=self._config.sample_rate, output_dir=audio_dir)
-            logger.info("Streaming session initialized")
+
+            if self._is_simulated_streaming:
+                # Reset VAD state for new session.
+                if self._simulated_vad is not None:
+                    try:
+                        self._simulated_vad.clear()
+                    except AttributeError:
+                        logger.debug("VAD clear() not available (older sherpa-onnx version)")
+                self._simulated_audio_buffer = None
+                logger.info("Simulated streaming session initialized (VAD + offline)")
+            else:
+                self._online_stream = self._online_recognizer.create_stream()
+                logger.info("Streaming session initialized")
 
         return {"status": "streaming", "language": self._config.language}
 
@@ -429,46 +470,49 @@ class SherpaASR:
     def feed_audio(self, base64_data: str) -> dict[str, Any]:
         """Decode a chunk of Base64-encoded float32 PCM audio.
 
-        The frontend sends audio as 16kHz mono float32 PCM encoded
-        in Base64. This method decodes it, feeds it to the recognizer,
-        and returns the current partial/final results.
+        Routes to true streaming or simulated streaming based on model type.
 
         Returns:
             dict with 'partial' (in-progress text) and
             'final' (list of finalized segments).
         """
-        if not self._is_streaming or self._online_stream is None:
+        if not self._is_streaming:
             return {"partial": "", "final": []}
 
         samples = base64_to_float32(base64_data)
-        sample_rate = self._config.sample_rate
 
         # Record PCM for later playback.
         if self._pcm_recorder is not None:
             self._pcm_recorder.write_chunk(samples)
 
-        # Feed audio into the stream.
-        # Use lock to avoid concurrent modification with stop_streaming.
+        if self._is_simulated_streaming:
+            return self._feed_audio_simulated(samples)
+
+        if self._online_stream is None:
+            return {"partial": "", "final": []}
+
+        return self._feed_audio_online(samples)
+
+    def _feed_audio_online(self, samples: np.ndarray) -> dict[str, Any]:
+        """Feed audio chunk to OnlineRecognizer (true streaming)."""
+        sample_rate = self._config.sample_rate
+
         with self._lock:
             self._online_stream.accept_waveform(sample_rate, samples)
 
-            # Decode until the recognizer needs more input.
             while self._online_recognizer.is_ready(self._online_stream):
                 self._online_recognizer.decode_stream(self._online_stream)
 
-            # Get the current partial result.
             result = self._online_recognizer.get_result(self._online_stream)
             self._partial_text = result.strip()
 
-            # Check if an endpoint was detected (sentence boundary).
-            # When endpoint fires, the finalized text becomes a segment.
             if self._online_recognizer.is_endpoint(self._online_stream):
                 if self._partial_text:
                     self._final_segments.append(
                         {
                             "index": self._segment_index,
                             "text": self._partial_text,
-                            "start_time": 0.0,  # Approximate; precise timing needs timestamp model
+                            "start_time": 0.0,
                             "end_time": 0.0,
                             "speaker": None,
                             "is_final": True,
@@ -483,6 +527,102 @@ class SherpaASR:
             "final": list(self._final_segments),
         }
 
+    def _feed_audio_simulated(self, samples: np.ndarray) -> dict[str, Any]:
+        """Feed audio chunk to VAD + OfflineRecognizer (simulated streaming).
+
+        Audio is buffered through VAD in window-sized chunks. When VAD
+        detects a completed speech segment, it is transcribed immediately.
+        """
+        with self._lock:
+            vad = self._simulated_vad
+            if vad is None or self._simulated_offline_recognizer is None:
+                return {"partial": "", "final": []}
+
+            # Prepend any leftover samples from the previous call.
+            if self._simulated_audio_buffer is not None:
+                samples = np.concatenate([self._simulated_audio_buffer, samples])
+                self._simulated_audio_buffer = None
+
+            window_size = vad.config.silero_vad.window_size
+
+            # Feed full window-sized chunks to VAD.
+            offset = 0
+            while offset + window_size <= len(samples):
+                vad.accept_waveform(samples[offset : offset + window_size])
+                offset += window_size
+
+            # Keep remainder for the next call.
+            if offset < len(samples):
+                self._simulated_audio_buffer = samples[offset:]
+
+            # Process any completed speech segments.
+            self._process_vad_segments()
+
+        return {"partial": "", "final": list(self._final_segments)}
+
+    def _pad_segment(self, samples, start_sample: int, total_samples: int = 0) -> tuple:
+        """Add silence padding around a VAD segment for better recognition.
+
+        Args:
+            samples: speech segment samples (list or ndarray).
+            start_sample: sample index where the segment starts.
+            total_samples: total audio length (0 if unknown).
+
+        Returns (padded_samples, adjusted_start_sample).
+        """
+        padding = int(self._config.vad_padding * 16000)
+        if padding <= 0:
+            return samples, start_sample
+        pad_before = min(padding, start_sample)
+        pad_after = padding
+        if total_samples > 0:
+            pad_after = min(padding, total_samples - start_sample - len(samples))
+        arr = np.array(samples, dtype=np.float32) if not isinstance(samples, np.ndarray) else samples
+        padded = np.zeros(len(arr) + pad_before + pad_after, dtype=np.float32)
+        padded[pad_before:pad_before + len(arr)] = arr
+        return padded, start_sample - pad_before
+
+    def _process_vad_segments(self) -> None:
+        """Transcribe all completed VAD speech segments.
+
+        Must be called while holding self._lock.
+        """
+        vad = self._simulated_vad
+        recognizer = self._simulated_offline_recognizer
+
+        while not vad.empty():
+            speech = vad.front
+            speech_samples = speech.samples
+            speech_start = speech.start
+            vad.pop()
+
+            if len(speech_samples) < 160:
+                continue
+
+            speech_samples, speech_start = self._pad_segment(speech_samples, speech_start)
+
+            try:
+                stream = recognizer.create_stream()
+                stream.accept_waveform(16000, speech_samples)
+                recognizer.decode_stream(stream)
+                text = stream.result.text.strip()
+            except Exception as exc:
+                logger.warning("Failed to transcribe VAD segment: %s", exc)
+                continue
+
+            if text:
+                self._final_segments.append(
+                    {
+                        "index": self._segment_index,
+                        "text": text,
+                        "start_time": round(speech_start / 16000, 2),
+                        "end_time": round((speech_start + len(speech_samples)) / 16000, 2),
+                        "speaker": None,
+                        "is_final": True,
+                    }
+                )
+                self._segment_index += 1
+
     def stop_streaming(self) -> dict[str, Any]:
         """Finalize streaming and return the complete transcript.
 
@@ -490,6 +630,9 @@ class SherpaASR:
             dict with 'text' (full transcript), 'segments' (list),
             and 'audio_path' (path to saved WAV file, if any).
         """
+        if self._is_simulated_streaming:
+            return self._stop_streaming_simulated()
+
         with self._lock:
             if self._online_stream is None:
                 self._is_streaming = False
@@ -518,6 +661,54 @@ class SherpaASR:
                         "is_final": True,
                     }
                 )
+
+            self._is_streaming = False
+            full_text = " ".join(s["text"] for s in self._final_segments)
+
+            # Save recorded audio to WAV file.
+            audio_path = None
+            if self._pcm_recorder is not None:
+                audio_path = self._pcm_recorder.close()
+                self._pcm_recorder = None
+
+        return {
+            "text": full_text,
+            "segments": self._final_segments,
+            "audio_path": audio_path,
+        }
+
+    def _stop_streaming_simulated(self) -> dict[str, Any]:
+        """Finalize simulated streaming: flush VAD and transcribe remaining audio."""
+        with self._lock:
+            if self._simulated_vad is None:
+                self._is_streaming = False
+                return {"text": "", "segments": [], "audio_path": None}
+
+            # Feed any remaining buffered audio to VAD.
+            if self._simulated_audio_buffer is not None and len(self._simulated_audio_buffer) > 0:
+                vad = self._simulated_vad
+                window_size = vad.config.silero_vad.window_size
+                buf = self._simulated_audio_buffer
+                self._simulated_audio_buffer = None
+                # Feed all buffered audio in window-sized chunks.
+                offset = 0
+                while offset < len(buf):
+                    chunk = buf[offset : offset + window_size]
+                    if len(chunk) < window_size:
+                        padded = np.zeros(window_size, dtype=np.float32)
+                        padded[: len(chunk)] = chunk
+                        chunk = padded
+                    vad.accept_waveform(chunk)
+                    offset += window_size
+
+            # Flush VAD to force detection of the final segment.
+            try:
+                self._simulated_vad.flush()
+            except AttributeError:
+                logger.debug("VAD flush() not available (older sherpa-onnx version)")
+
+            # Process any remaining segments.
+            self._process_vad_segments()
 
             self._is_streaming = False
             full_text = " ".join(s["text"] for s in self._final_segments)
@@ -567,6 +758,30 @@ class SherpaASR:
         samples, sr = read_audio_as_mono_16k(path)
         total_duration = len(samples) / sr
 
+        if not self._config.offline_use_vad:
+            logger.info("offline_use_vad=False, transcribing entire audio without VAD segmentation")
+            # Transcribe entire audio without VAD segmentation.
+            if on_progress:
+                on_progress(20)
+            stream = self._offline_recognizer.create_stream()
+            stream.accept_waveform(16000, samples)
+            self._offline_recognizer.decode_stream(stream)
+            text = stream.result.text.strip()
+            if on_progress:
+                on_progress(100)
+            if text:
+                return [
+                    {
+                        "index": 0,
+                        "text": text,
+                        "start_time": 0.0,
+                        "end_time": round(total_duration, 2),
+                        "speaker": None,
+                        "is_final": True,
+                    }
+                ]
+            return []
+
         # Use VAD to segment speech regions.
         # Buffer must exceed audio duration to avoid 0-sample segments.
         vad_buffer = int(total_duration) + 60
@@ -597,6 +812,8 @@ class SherpaASR:
 
             if len(speech_samples) < 160:  # Skip very short segments (< 10ms).
                 continue
+
+            speech_samples, speech_start = self._pad_segment(speech_samples, speech_start, total_samples=len(samples))
 
             stream = self._offline_recognizer.create_stream()
             stream.accept_waveform(16000, speech_samples)
@@ -702,11 +919,11 @@ class SherpaASR:
             raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
 
         # Check for SenseVoice by directory name.
-        dir_name = model_dir.name.lower()
-        is_sense_voice = "sense-voice" in dir_name or "sensevoice" in dir_name
+        is_sense_voice = self._is_sense_voice_dir(model_dir)
 
         # Try Paraformer model (model.int8.onnx takes priority).
-        paraformer_model = self._find_file(model_dir, "model.int8.onnx")
+        # Skip if this is a SenseVoice model directory — SenseVoice also uses model.int8.onnx.
+        paraformer_model = None if is_sense_voice else self._find_file(model_dir, "model.int8.onnx")
         if not paraformer_model:
             # model.onnx could be Paraformer or SenseVoice -- use dir name to decide.
             if not is_sense_voice:
@@ -735,6 +952,7 @@ class SherpaASR:
             )
 
         # Try Cohere Transcribe model (cohere-transcribe in dir name, encoder + decoder + tokens).
+        dir_name = model_dir.name.lower()
         if "cohere-transcribe" in dir_name or "cohere_transcribe" in dir_name:
             cohere_encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
             cohere_decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
@@ -781,27 +999,55 @@ class SherpaASR:
             "encoder.onnx + decoder.onnx (Whisper)."
         )
 
-    def _create_vad(self, sherpa_onnx: Any, buffer_seconds: int = 600) -> Any:
+    def _create_vad(self, sherpa_onnx: Any, buffer_seconds: int = 600, *, streaming: bool = False) -> Any:
         """Create a Voice Activity Detector for speech segmentation.
 
         Args:
             buffer_seconds: Must exceed the audio duration, otherwise
                 the VAD discards sample data and produces 0-sample segments.
+            streaming: If True, use longer min_silence_duration to avoid
+                splitting sentences mid-utterance during real-time recognition.
         """
-        # Look for silero_vad.onnx in the model directory.
-        vad_model = self._model_dir() / "silero_vad.onnx"
-        if not vad_model.exists():
+        # Look for the configured VAD model in the model directory.
+        # Auto-detect: prefer v5, fall back to v4.
+        models_dir = self._model_dir()
+        if self._config.active_vad_model and self._config.active_vad_model != "auto":
+            candidates = [self._config.active_vad_model + ".onnx"]
+        else:
+            candidates = ["silero_vad_v5.onnx", "silero_vad.onnx"]
+        vad_model = None
+        for filename in candidates:
+            candidate = models_dir / filename
+            if candidate.exists():
+                vad_model = candidate
+                break
+        if vad_model is None:
             # Fall back to sherpa-onnx built-in VAD asset path.
-            # If not available, create a simple VAD with default config.
             try:
-                vad_model = Path(sherpa_onnx.__file__).parent / "silero_vad.onnx"
+                vad_model = Path(sherpa_onnx.__file__).parent / candidates[0]
             except Exception:
                 pass
 
         config = sherpa_onnx.VadModelConfig()
-        if vad_model.exists():
+        if vad_model is not None and vad_model.exists():
             config.silero_vad.model = str(vad_model)
-        config.silero_vad.min_silence_duration = 0.4
+        # For streaming: use a multiplier on the user's setting to allow
+        # longer pauses without cutting sentences mid-phrase.
+        config.silero_vad.min_silence_duration = (
+            self._config.vad_min_silence_duration * 1.6 if streaming
+            else self._config.vad_min_silence_duration
+        )
+        config.silero_vad.min_speech_duration = self._config.vad_min_speech_duration
+        config.silero_vad.max_speech_duration = self._config.vad_max_speech_duration
+        config.silero_vad.threshold = self._config.vad_threshold
+        logger.info(
+            "VAD config: threshold=%.2f, min_silence=%.2fs, min_speech=%.2fs, "
+            "max_speech=%.1fs, model=%s, streaming=%s",
+            config.silero_vad.threshold, config.silero_vad.min_silence_duration,
+            config.silero_vad.min_speech_duration, config.silero_vad.max_speech_duration,
+            vad_model.name if vad_model and vad_model.exists() else "builtin/default",
+            streaming,
+        )
         config.sample_rate = 16000
 
         return sherpa_onnx.VoiceActivityDetector(
@@ -815,6 +1061,10 @@ class SherpaASR:
         self._online_recognizer = None
         self._online_stream = None
         self._offline_recognizer = None
+        self._simulated_vad = None
+        self._simulated_offline_recognizer = None
         self._is_streaming = False
+        self._is_simulated_streaming = False
+        self._simulated_audio_buffer = None
         self._pcm_recorder = None
         logger.info("ASR models released")

@@ -146,7 +146,7 @@ onMounted(() => {
   <div class="rounded-lg border border-base-300 bg-base-100 p-4 space-y-4">
     <!-- AI Provider -->
     <div>
-      <h2 class="text-sm font-semibold text-base-content/50 uppercase tracking-wider mb-2">AI Provider</h2>
+      <h2 class="text-sm font-semibold text-base-content/50 uppercase tracking-wider mb-2">AI 服务商</h2>
       <select
         :value="activeApiPresetId"
         class="select select-bordered select-sm w-full"
@@ -160,15 +160,15 @@ onMounted(() => {
 
     <!-- Processing Mode (buttons only) -->
     <div>
-      <h2 class="text-sm font-semibold text-base-content/50 uppercase tracking-wider mb-2">Processing Mode</h2>
+      <h2 class="text-sm font-semibold text-base-content/50 uppercase tracking-wider mb-2">处理模式</h2>
       <div class="space-y-1">
         <!-- Built-in modes -->
         <button
           v-for="m in [
-            { key: 'polish' as AiMode, label: 'Polish', desc: 'Revise prose' },
-            { key: 'note' as AiMode, label: 'Notes', desc: 'Structured notes' },
-            { key: 'mindmap' as AiMode, label: 'Mind Map', desc: 'Markmap' },
-            { key: 'brainstorm' as AiMode, label: 'Brainstorm', desc: 'Critical thinking' },
+            { key: 'polish' as AiMode, label: '润色', desc: '修饰文本' },
+            { key: 'note' as AiMode, label: '笔记', desc: '结构化笔记' },
+            { key: 'mindmap' as AiMode, label: '思维导图', desc: 'Markmap' },
+            { key: 'brainstorm' as AiMode, label: '头脑风暴', desc: '发散思考' },
           ]"
           :key="m.key"
           class="btn btn-sm w-full justify-start"
@@ -181,7 +181,7 @@ onMounted(() => {
 
         <!-- Custom presets -->
         <template v-if="customPresets.length > 0">
-          <div class="divider my-1 text-xs text-base-content/30">Custom</div>
+          <div class="divider my-1 text-xs text-base-content/30">自定义</div>
           <button
             v-for="p in customPresets"
             :key="p.id"
@@ -203,20 +203,20 @@ onMounted(() => {
         @click="handleProcess"
       >
         <span v-if="isProcessing" class="loading loading-spinner loading-sm"></span>
-        {{ isProcessing ? "Processing..." : "Process" }}
+        {{ isProcessing ? "处理中..." : "处理" }}
       </button>
       <button
         v-if="isProcessing"
         class="btn btn-error btn-outline w-full"
         @click="handleCancel"
-      >Cancel</button>
+      >取消</button>
     </div>
 
     <!-- Saved results navigation -->
     <div v-if="savedModes.length > 0">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm font-semibold text-base-content/50 uppercase tracking-wider">
-          Results ({{ savedModes.length }})
+          结果 ({{ savedModes.length }})
         </h3>
       </div>
       <div class="space-y-1 max-h-[35vh] overflow-y-auto">
@@ -239,7 +239,7 @@ onMounted(() => {
           </button>
           <button
             class="btn btn-ghost btn-xs text-error flex-shrink-0 ml-1"
-            title="Delete"
+            title="删除"
             @click="handleDeleteResult(mode)"
           >
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

@@ -37,6 +37,13 @@ class AsrConfig:
     custom_ghproxy_domain: str | None = None
     proxy_mode: str = "none"
     proxy_url: str | None = None
+    vad_min_silence_duration: float = 0.7
+    vad_min_speech_duration: float = 0.25
+    vad_max_speech_duration: float = 8.0
+    vad_threshold: float = 0.05
+    offline_use_vad: bool = True
+    vad_padding: float = 0.8
+    active_vad_model: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,13 @@ class AppConfig:
                 "custom_ghproxy_domain": self.asr.custom_ghproxy_domain,
                 "proxy_mode": self.asr.proxy_mode,
                 "proxy_url": self.asr.proxy_url,
+                "vad_min_silence_duration": self.asr.vad_min_silence_duration,
+                "vad_min_speech_duration": self.asr.vad_min_speech_duration,
+                "vad_max_speech_duration": self.asr.vad_max_speech_duration,
+                "vad_threshold": self.asr.vad_threshold,
+                "offline_use_vad": self.asr.offline_use_vad,
+                "vad_padding": self.asr.vad_padding,
+                "active_vad_model": self.asr.active_vad_model,
             },
             "ai": {
                 "provider": self.ai.provider,
@@ -131,6 +145,13 @@ class AppConfig:
                 custom_ghproxy_domain=custom_ghproxy_domain,
                 proxy_mode=asr_d.get("proxy_mode", "none"),
                 proxy_url=asr_d.get("proxy_url"),
+                vad_min_silence_duration=asr_d.get("vad_min_silence_duration", 0.7),
+                vad_min_speech_duration=asr_d.get("vad_min_speech_duration", 0.25),
+                vad_max_speech_duration=asr_d.get("vad_max_speech_duration", 8.0),
+                vad_threshold=asr_d.get("vad_threshold", 0.05),
+                offline_use_vad=asr_d.get("offline_use_vad", True),
+                vad_padding=asr_d.get("vad_padding", 0.8),
+                active_vad_model=asr_d.get("active_vad_model", "auto"),
             ),
             ai=AiConfig(
                 provider=ai_d.get("provider", "openai"),

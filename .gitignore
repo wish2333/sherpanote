@@ -181,6 +181,9 @@ bun.lock
 # Claude Code
 runCC-GLM.bat
 runCC-OR.bat
+run.command
+ClaudeCode.py
+ClaudeCode.env
 .claude/
 CLAUDE.md
 

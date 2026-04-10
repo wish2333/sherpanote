@@ -69,6 +69,13 @@ export const useAppStore = defineStore("app", () => {
     custom_ghproxy_domain: null,
     proxy_mode: "none",
     proxy_url: null,
+    vad_min_silence_duration: 0.7,
+    vad_min_speech_duration: 0.25,
+    vad_max_speech_duration: 8.0,
+    vad_threshold: 0.05,
+    offline_use_vad: true,
+    vad_padding: 0.8,
+    active_vad_model: "auto",
   });
 
   /* ---- toast notifications ---- */

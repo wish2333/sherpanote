@@ -76,7 +76,7 @@ onBeforeUnmount(() => {
             :class="{ 'bg-base-200': $route.path === '/' }"
             @click="router.push('/')"
           >
-            <span class="text-sm">Records</span>
+            <span class="text-sm">转录记录</span>
           </a>
         </li>
         <li>
@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
             :class="{ 'bg-base-200': $route.path === '/record' }"
             @click="router.push('/record')"
           >
-            <span class="text-sm">Record</span>
+            <span class="text-sm">录音/转录</span>
           </a>
         </li>
         <li>
@@ -92,7 +92,7 @@ onBeforeUnmount(() => {
             :class="{ 'bg-base-200': $route.path === '/audio' }"
             @click="router.push('/audio')"
           >
-            <span class="text-sm">Audio Files</span>
+            <span class="text-sm">音频管理器</span>
           </a>
         </li>
       </ul>

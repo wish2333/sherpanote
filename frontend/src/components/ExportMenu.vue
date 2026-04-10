@@ -68,7 +68,7 @@ function formatPath(path: string): string {
     <div class="dropdown dropdown-end">
       <div tabindex="0" role="button" class="btn btn-outline btn-sm">
         <span v-if="isExporting" class="loading loading-spinner loading-xs"></span>
-        Export
+        导出
         <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -78,7 +78,7 @@ function formatPath(path: string): string {
         <li class="px-1 pb-1 mb-1 border-b border-base-200">
           <label class="label cursor-pointer gap-2 justify-start">
             <input v-model="includeAi" type="checkbox" class="toggle toggle-primary toggle-xs" />
-            <span class="label-text text-sm">Include AI Results</span>
+            <span class="label-text text-sm">包含 AI 结果</span>
           </label>
         </li>
         <!-- Format options -->
@@ -96,7 +96,7 @@ function formatPath(path: string): string {
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
-            Open File
+            打开文件
           </a>
         </li>
         <li v-if="lastExportPath">
@@ -104,7 +104,7 @@ function formatPath(path: string): string {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
             </svg>
-            Open Folder
+            打开文件夹
           </a>
         </li>
       </ul>

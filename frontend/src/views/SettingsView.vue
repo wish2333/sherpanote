@@ -32,7 +32,7 @@ const maxVersions = ref(20);
 const isSaving = ref(false);
 const isTesting = ref(false);
 const testResult = ref<{ success: boolean; message: string } | null>(null);
-const activeTab = ref<"general" | "ai" | "processing" | "asr">("general");
+const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management">("general");
 
 const providers = [
   { value: "openai", label: "OpenAI" },
@@ -310,12 +310,59 @@ const proxyModes = [
 ];
 
 const installedStreamingModels = computed(() =>
-  installedModels.value.filter((m) => m.model_type === "streaming"),
+  installedModels.value.filter(
+    (m) =>
+      m.model_type === "streaming" ||
+      // SenseVoice and Qwen3-ASR models support simulated streaming via VAD + offline recognizer.
+      m.model_id.includes("sense-voice") || m.model_id.includes("sensevoice") ||
+      m.model_id.includes("qwen3-asr"),
+  ),
 );
 
 const installedOfflineModels = computed(() =>
   installedModels.value.filter((m) => m.model_type === "offline"),
 );
+
+const installedVadModels = computed(() =>
+  installedModels.value.filter((m) => m.model_type === "vad"),
+);
+
+// ---- Non-linear VAD threshold mapping ----
+// Raw slider 0-100 → threshold: 0-50 maps to 0.01-0.10 (fine), 50-100 maps to 0.10-0.90 (coarser)
+function vadThresholdToRaw(threshold: number): number {
+  if (threshold <= 0.1) return Math.round((threshold - 0.01) / 0.09 * 50);
+  return Math.round(50 + (threshold - 0.1) / 0.8 * 50);
+}
+function rawToVadThreshold(raw: number): number {
+  if (raw <= 50) return Math.round((raw / 50 * 0.09 + 0.01) * 1000) / 1000;
+  return Math.round(((raw - 50) / 50 * 0.8 + 0.1) * 100) / 100;
+}
+const vadThresholdRaw = computed({
+  get: () => vadThresholdToRaw(asrConfig.value.vad_threshold),
+  set: (v: number) => { asrConfig.value.vad_threshold = rawToVadThreshold(v); },
+});
+
+// ---- Non-linear VAD max_speech_duration mapping ----
+// Raw slider 0-100 → duration: 0-50 → 5-20s (fine), 50-80 → 20-60s, 80-100 → 60-120s
+function speechToRaw(dur: number): number {
+  if (dur <= 20) return Math.round((dur - 5) / 15 * 50);
+  if (dur <= 60) return Math.round(50 + (dur - 20) / 40 * 30);
+  return Math.round(80 + (dur - 60) / 60 * 20);
+}
+function rawToSpeech(raw: number): number {
+  if (raw <= 50) return Math.round((raw / 50 * 15 + 5) * 10) / 10;
+  if (raw <= 80) return Math.round(((raw - 50) / 30 * 40 + 20) * 10) / 10;
+  return Math.round(((raw - 80) / 20 * 60 + 60) * 10) / 10;
+}
+const vadSpeechRaw = computed({
+  get: () => speechToRaw(asrConfig.value.vad_max_speech_duration),
+  set: (v: number) => { asrConfig.value.vad_max_speech_duration = rawToSpeech(v); },
+});
+
+function supportsSimulatedStreaming(modelId: string): boolean {
+  return modelId.includes("sense-voice") || modelId.includes("sensevoice") ||
+    modelId.includes("qwen3-asr");
+}
 
 function isModelInstalled(modelId: string): boolean {
   return installedModels.value.some((m) => m.model_id === modelId);
@@ -529,9 +576,9 @@ onUnmounted(() => {
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 18l-6-6 6-6" />
         </svg>
-        Back
+        返回
       </button>
-      <h1 class="text-xl font-bold tracking-tight text-base-content">Settings</h1>
+      <h1 class="text-xl font-bold tracking-tight text-base-content">设置</h1>
     </div>
 
     <!-- Tab navigation -->
@@ -540,39 +587,43 @@ onUnmounted(() => {
         class="tab"
         :class="{ 'tab-active': activeTab === 'general' }"
         @click="activeTab = 'general'"
-      >General</a>
+      >通用</a>
       <a
         class="tab"
         :class="{ 'tab-active': activeTab === 'ai' }"
         @click="activeTab = 'ai'"
-      >AI Model</a>
+      >AI 模型</a>
       <a
         class="tab"
         :class="{ 'tab-active': activeTab === 'processing' }"
         @click="activeTab = 'processing'"
-      >Processing</a>
+      >处理</a>
       <a
         class="tab"
-        :class="{ 'tab-active': activeTab === 'asr' }"
-        @click="activeTab = 'asr'"
-      >ASR Engine</a>
+        :class="{ 'tab-active': activeTab === 'model-settings' }"
+        @click="activeTab = 'model-settings'"
+      >模型设置</a>
+      <a
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'model-management' }"
+        @click="activeTab = 'model-management'"
+      >模型管理</a>
     </div>
 
     <!-- General Settings -->
     <div v-show="activeTab === 'general'" class="space-y-4">
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">Version History</h2>
+          <h2 class="card-title text-base">版本历史</h2>
           <p class="text-sm text-base-content/60">
-            Configure how many versions are kept per record.
-            Save Version creates a snapshot manually or automatically on exit.
+            配置每条记录保留的版本数量。保存版本会手动或退出时自动创建快照。
           </p>
 
           <div class="mt-4 space-y-4">
             <!-- Max Version History -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Max Version History</span>
+                <span class="label-text font-medium">最大版本历史</span>
               </label>
               <input
                 v-model.number="maxVersions"
@@ -584,7 +635,7 @@ onUnmounted(() => {
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Maximum versions per record. 0 = unlimited. Oldest versions are auto-deleted.
+                  每条记录的最大版本数。0 = 不限。超出时自动删除最旧版本。
                 </span>
               </label>
             </div>
@@ -592,7 +643,7 @@ onUnmounted(() => {
             <!-- Auto Punctuation Toggle -->
             <div class="form-control">
               <label class="label cursor-pointer justify-start gap-4">
-                <span class="label-text font-medium">Auto Punctuation</span>
+                <span class="label-text font-medium">自动标点</span>
                 <input
                   v-model="asrConfig.auto_punctuate"
                   type="checkbox"
@@ -601,7 +652,7 @@ onUnmounted(() => {
               </label>
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Use AI to add punctuation marks to transcription output. Requires AI configuration.
+                  使用 AI 为转写结果添加标点符号。需要配置 AI。
                 </span>
               </label>
             </div>
@@ -609,11 +660,11 @@ onUnmounted(() => {
             <!-- Auto AI Processing after Transcription -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Auto AI Processing</span>
+                <span class="label-text font-medium">自动 AI 处理</span>
               </label>
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Select AI processing modes to run automatically after transcription completes.
+                  选择转写完成后自动运行的 AI 处理模式。
                 </span>
               </label>
               <div class="flex flex-wrap gap-2 mt-1">
@@ -639,7 +690,7 @@ onUnmounted(() => {
               </div>
               <label v-if="autoAiModes.length > 0" class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Active: {{ autoAiModes.join(', ') }}. Requires AI configuration.
+                  Active: {{ autoAiModes.join(', ') }}。需要配置 AI。
                 </span>
               </label>
             </div>
@@ -652,7 +703,7 @@ onUnmounted(() => {
               @click="saveConfig"
             >
               <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
-              Save
+              保存
             </button>
           </div>
         </div>
@@ -665,16 +716,16 @@ onUnmounted(() => {
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
           <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">API Presets</h2>
+            <h2 class="card-title text-base">API 预设</h2>
             <button
               class="btn btn-outline btn-sm"
               @click="openNewPresetForm"
             >
-              Add Preset
+              添加预设
             </button>
           </div>
           <p class="text-sm text-base-content/60">
-            Save multiple API configurations for quick switching between providers.
+            保存多个 API 配置，方便在不同服务商之间快速切换。
           </p>
 
           <!-- Preset list -->
@@ -688,11 +739,11 @@ onUnmounted(() => {
               <button
                 class="flex-1 min-w-0 text-left"
                 @click="handleActivatePreset(preset.id)"
-                :title="preset.is_active ? 'Already active' : 'Click to activate'"
+                :title="preset.is_active ? '当前正在使用' : '点击切换'"
               >
                 <div class="flex items-center gap-2">
                   <span class="font-medium text-sm">{{ preset.name }}</span>
-                  <span v-if="preset.is_active" class="badge badge-primary badge-xs">Active</span>
+                  <span v-if="preset.is_active" class="badge badge-primary badge-xs">使用中</span>
                 </div>
                 <div class="mt-0.5 text-xs text-base-content/50">
                   {{ preset.provider }} / {{ preset.model }}
@@ -701,7 +752,7 @@ onUnmounted(() => {
               <div class="ml-3 flex items-center gap-1 flex-shrink-0">
                 <button
                   class="btn btn-ghost btn-xs"
-                  title="Edit"
+                  title="编辑"
                   @click="openEditPresetForm(preset)"
                 >
                   <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -713,11 +764,11 @@ onUnmounted(() => {
                   v-if="deletePresetConfirmId === preset.id"
                   class="btn btn-error btn-xs"
                   @click="handleDeletePreset(preset.id)"
-                >Confirm</button>
+                >确认</button>
                 <button
                   v-else
                   class="btn btn-ghost btn-xs text-error"
-                  title="Delete"
+                  title="删除"
                   @click="deletePresetConfirmId = preset.id"
                 >
                   <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -731,16 +782,16 @@ onUnmounted(() => {
             </div>
           </div>
           <p v-else class="mt-4 text-sm text-base-content/40">
-            No presets yet. Click "Add Preset" to create one.
+            暂无预设，点击"添加预设"创建。
           </p>
 
           <!-- Preset form (inline) -->
           <div v-if="showPresetForm" class="mt-4 rounded-lg border border-base-300 p-4 space-y-3">
             <h3 class="text-sm font-semibold">
-              {{ editingPreset ? 'Edit Preset' : 'New Preset' }}
+              {{ editingPreset ? '编辑预设' : '新建预设' }}
             </h3>
             <div class="form-control">
-              <label class="label"><span class="label-text text-sm">Preset Name</span></label>
+              <label class="label"><span class="label-text text-sm">预设名称</span></label>
               <input
                 v-model="presetForm.name"
                 type="text"
@@ -750,13 +801,13 @@ onUnmounted(() => {
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div class="form-control">
-                <label class="label"><span class="label-text text-sm">Provider</span></label>
+                <label class="label"><span class="label-text text-sm">服务商</span></label>
                 <select v-model="presetForm.provider" class="select select-bordered select-sm w-full">
                   <option v-for="p in providers" :key="p.value" :value="p.value">{{ p.label }}</option>
                 </select>
               </div>
               <div class="form-control">
-                <label class="label"><span class="label-text text-sm">Model</span></label>
+                <label class="label"><span class="label-text text-sm">模型</span></label>
                 <input
                   v-model="presetForm.model"
                   type="text"
@@ -766,7 +817,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="form-control">
-              <label class="label"><span class="label-text text-sm">API Key</span></label>
+              <label class="label"><span class="label-text text-sm">API 密钥</span></label>
               <input
                 v-model="presetForm.api_key"
                 type="password"
@@ -775,7 +826,7 @@ onUnmounted(() => {
               />
             </div>
             <div class="form-control">
-              <label class="label"><span class="label-text text-sm">Base URL</span></label>
+              <label class="label"><span class="label-text text-sm">接口地址</span></label>
               <input
                 v-model="presetForm.base_url"
                 type="text"
@@ -790,12 +841,12 @@ onUnmounted(() => {
                 @click="testPresetConnection"
               >
                 <span v-if="isTestingPreset" class="loading loading-spinner loading-xs"></span>
-                Test
+                测试
               </button>
               <div class="flex gap-2">
-                <button class="btn btn-ghost btn-sm" @click="cancelPresetForm">Cancel</button>
+                <button class="btn btn-ghost btn-sm" @click="cancelPresetForm">取消</button>
                 <button class="btn btn-primary btn-sm" @click="savePreset">
-                  {{ editingPreset ? 'Update' : 'Create' }}
+                  {{ editingPreset ? '更新' : '创建' }}
                 </button>
               </div>
             </div>
@@ -814,16 +865,16 @@ onUnmounted(() => {
       <!-- Current AI Configuration Card -->
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">AI Model Configuration</h2>
+          <h2 class="card-title text-base">AI 模型配置</h2>
           <p class="text-sm text-base-content/60">
-            Fine-tune the active AI provider. Changes here are saved as the current config.
+            微调当前 AI 服务商配置。修改后需保存。
           </p>
 
           <div class="mt-4 space-y-4">
             <!-- Provider -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Provider</span>
+                <span class="label-text font-medium">服务商</span>
               </label>
               <select v-model="aiConfig.provider" class="select select-bordered w-full">
                 <option v-for="p in providers" :key="p.value" :value="p.value">
@@ -835,7 +886,7 @@ onUnmounted(() => {
             <!-- Model -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Model</span>
+                <span class="label-text font-medium">模型</span>
               </label>
               <input
                 v-model="aiConfig.model"
@@ -848,7 +899,7 @@ onUnmounted(() => {
             <!-- API Key -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">API Key</span>
+                <span class="label-text font-medium">API 密钥</span>
               </label>
               <input
                 v-model="aiConfig.api_key"
@@ -858,7 +909,7 @@ onUnmounted(() => {
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Not required for Ollama (local models).
+                  Ollama（本地模型）无需填写。
                 </span>
               </label>
             </div>
@@ -866,7 +917,7 @@ onUnmounted(() => {
             <!-- Base URL -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Custom API URL</span>
+                <span class="label-text font-medium">自定义接口地址</span>
               </label>
               <input
                 v-model="aiConfig.base_url"
@@ -879,11 +930,11 @@ onUnmounted(() => {
             <!-- Temperature -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Temperature</span>
+                <span class="label-text font-medium">温度</span>
                 <span class="label-text-alt text-base-content/50">{{ aiConfig.temperature }}</span>
               </label>
               <label class="flex items-center gap-3">
-                <span class="text-xs text-base-content/40 w-12 shrink-0">Precise</span>
+                <span class="text-xs text-base-content/40 w-12 shrink-0">精确</span>
                 <input
                   v-model.number="aiConfig.temperature"
                   type="range"
@@ -892,21 +943,21 @@ onUnmounted(() => {
                   step="0.1"
                   class="range range-primary range-xs flex-1"
                 />
-                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">Creative</span>
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">创意</span>
               </label>
             </div>
 
             <!-- Max Tokens Mode -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Max Tokens</span>
+                <span class="label-text font-medium">最大 Token 数</span>
               </label>
               <div class="flex flex-col gap-2">
                 <label
                   v-for="opt in [
-                    { value: 'auto' as const, label: 'Auto', desc: 'Estimate based on input length' },
-                    { value: 'custom' as const, label: 'Fixed', desc: 'Use the value below' },
-                    { value: 'default' as const, label: 'Model Default', desc: 'No limit, let model decide' },
+                    { value: 'auto' as const, label: '自动', desc: '根据输入长度估算' },
+                    { value: 'custom' as const, label: '固定值', desc: '使用下方设定值' },
+                    { value: 'default' as const, label: '模型默认', desc: '不限制，由模型决定' },
                   ]"
                   :key="opt.value"
                   class="flex items-center gap-3 cursor-pointer"
@@ -930,7 +981,7 @@ onUnmounted(() => {
             <!-- Max Tokens Value (visible when custom) -->
             <div v-if="maxTokensMode === 'custom'" class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Tokens Value</span>
+                <span class="label-text font-medium">Token 数值</span>
               </label>
               <input
                 v-model.number="aiConfig.max_tokens"
@@ -951,7 +1002,7 @@ onUnmounted(() => {
               @click="testConnection"
             >
               <span v-if="isTesting" class="loading loading-spinner loading-xs"></span>
-              Test Connection
+              测试连接
             </button>
             <button
               class="btn btn-primary btn-sm"
@@ -959,7 +1010,7 @@ onUnmounted(() => {
               @click="saveConfig"
             >
               <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
-              Save Configuration
+              保存 Configuration
             </button>
           </div>
 
@@ -980,16 +1031,16 @@ onUnmounted(() => {
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
           <div class="flex items-center justify-between">
-            <h2 class="card-title text-base">AI Processing Presets</h2>
+            <h2 class="card-title text-base">AI 处理预设</h2>
             <button
               class="btn btn-outline btn-sm"
               @click="openNewProcessingPresetForm"
             >
-              Add Preset
+              添加预设
             </button>
           </div>
           <p class="text-sm text-base-content/60">
-            Manage prompt templates for AI text processing. Built-in presets cannot be deleted.
+            管理 AI 文本处理的提示词模板。内置预设不可删除。
           </p>
 
           <!-- Preset list -->
@@ -1003,7 +1054,7 @@ onUnmounted(() => {
                 <div class="flex items-center gap-2">
                   <span class="font-medium text-sm">{{ preset.name }}</span>
                   <span class="badge badge-sm">{{ preset.mode }}</span>
-                  <span v-if="preset.id.startsWith('builtin_')" class="badge badge-ghost badge-xs">built-in</span>
+                  <span v-if="preset.id.startsWith('builtin_')" class="badge badge-ghost badge-xs">内置</span>
                 </div>
                 <div class="mt-0.5 text-xs text-base-content/40 truncate max-w-[400px]">
                   {{ preset.prompt.slice(0, 100) }}{{ preset.prompt.length > 100 ? '...' : '' }}
@@ -1012,7 +1063,7 @@ onUnmounted(() => {
               <div class="ml-3 flex items-center gap-1 flex-shrink-0">
                 <button
                   class="btn btn-ghost btn-xs"
-                  title="Edit"
+                  title="编辑"
                   @click="openEditProcessingPresetForm(preset)"
                 >
                   <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1024,11 +1075,11 @@ onUnmounted(() => {
                   v-if="deleteProcessingPresetConfirmId === preset.id"
                   class="btn btn-error btn-xs"
                   @click="handleDeleteProcessingPreset(preset.id)"
-                >Confirm</button>
+                >确认</button>
                 <button
                   v-else-if="!preset.id.startsWith('builtin_')"
                   class="btn btn-ghost btn-xs text-error"
-                  title="Delete"
+                  title="删除"
                   @click="deleteProcessingPresetConfirmId = preset.id"
                 >
                   <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1045,11 +1096,11 @@ onUnmounted(() => {
           <!-- Processing preset form (inline) -->
           <div v-if="showProcessingPresetForm" class="mt-4 rounded-lg border border-base-300 p-4 space-y-3">
             <h3 class="text-sm font-semibold">
-              {{ editingProcessingPreset ? 'Edit Processing Preset' : 'New Processing Preset' }}
+              {{ editingProcessingPreset ? '编辑处理预设' : '新建处理预设' }}
             </h3>
             <div class="grid grid-cols-2 gap-3">
               <div class="form-control">
-                <label class="label"><span class="label-text text-sm">Preset Name</span></label>
+                <label class="label"><span class="label-text text-sm">预设名称</span></label>
                 <input
                   v-model="processingPresetForm.name"
                   type="text"
@@ -1058,20 +1109,20 @@ onUnmounted(() => {
                 />
               </div>
               <div class="form-control">
-                <label class="label"><span class="label-text text-sm">Mode</span></label>
+                <label class="label"><span class="label-text text-sm">模式</span></label>
                 <select v-model="processingPresetForm.mode" class="select select-bordered select-sm w-full">
                   <option v-for="m in processingModeOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
                 </select>
               </div>
             </div>
             <div class="form-control">
-              <label class="label"><span class="label-text text-sm">Prompt Template</span></label>
-              <label class="label"><span class="label-text-alt text-base-content/40">Use {text} as placeholder for the input text.</span></label>
+              <label class="label"><span class="label-text text-sm">提示词模板</span></label>
+              <label class="label"><span class="label-text-alt text-base-content/40">使用 {text} 作为输入文本的占位符。</span></label>
               <textarea
                 v-model="processingPresetForm.prompt"
                 class="textarea textarea-bordered w-full text-sm"
                 rows="6"
-                placeholder="Enter your prompt template here. Use {text} where the user's text should be inserted."
+                placeholder="在此输入提示词模板。使用 {text} 标记需要插入用户文本的位置。"
               ></textarea>
             </div>
             <div class="flex gap-2 justify-end">
@@ -1085,28 +1136,28 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- ASR Configuration -->
-    <div v-show="activeTab === 'asr'" class="space-y-4">
-      <!-- Basic ASR Settings Card -->
+    <!-- 模型设置 -->
+    <div v-show="activeTab === 'model-settings'" class="space-y-4">
+      <!-- ASR Engine Configuration Card -->
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">ASR Engine Configuration</h2>
+          <h2 class="card-title text-base">ASR 引擎配置</h2>
           <p class="text-sm text-base-content/60">
-            Configure the sherpa-onnx speech recognition engine.
+            配置 sherpa-onnx 语音识别引擎的运行参数。
           </p>
 
           <div class="mt-4 space-y-4">
             <!-- Active Streaming Model -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Streaming Model</span>
+                <span class="label-text font-medium">流式识别模型</span>
               </label>
               <select
                 v-model="asrConfig.active_streaming_model"
                 class="select select-bordered w-full"
                 @change="saveConfig"
               >
-                <option value="">(Auto-detect)</option>
+                <option value="">(自动检测)</option>
                 <option
                   v-for="m in installedStreamingModels"
                   :key="m.model_id"
@@ -1120,14 +1171,14 @@ onUnmounted(() => {
             <!-- Active Offline Model -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Offline Model</span>
+                <span class="label-text font-medium">离线识别模型</span>
               </label>
               <select
                 v-model="asrConfig.active_offline_model"
                 class="select select-bordered w-full"
                 @change="saveConfig"
               >
-                <option value="">(Auto-detect)</option>
+                <option value="">(自动检测)</option>
                 <option
                   v-for="m in installedOfflineModels"
                   :key="m.model_id"
@@ -1138,31 +1189,176 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <!-- Model Directory -->
+            <!-- VAD Settings -->
+            <div class="divider text-xs">VAD 语音检测</div>
+            <p class="text-xs text-base-content/50">
+              VAD（Voice Activity Detection）用于检测语音段落的起止。以下参数影响实时流式识别和文件转写的分段行为。
+            </p>
+
+            <!-- active_vad_model -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Model Directory</span>
+                <span class="label-text font-medium">VAD 模型</span>
               </label>
-              <div class="flex gap-2">
+              <select
+                v-model="asrConfig.active_vad_model"
+                class="select select-bordered w-full"
+                @change="saveConfig"
+              >
+                <option value="auto">自动（优先 v5）</option>
+                <option
+                  v-for="m in installedVadModels"
+                  :key="m.model_id"
+                  :value="m.model_id"
+                >
+                  {{ availableModels.find(e => e.model_id === m.model_id)?.display_name ?? m.model_id }}
+                </option>
+              </select>
+              <p class="text-xs text-base-content/40 mt-1">
+                自动模式下优先使用 v5，无 v5 时回退 v4。在模型管理页下载。
+              </p>
+            </div>
+
+            <!-- offline_use_vad -->
+            <div class="form-control">
+              <label class="label cursor-pointer justify-start gap-3">
                 <input
-                  v-model="asrConfig.model_dir"
-                  type="text"
-                  class="input input-bordered flex-1"
-                  placeholder="Path to sherpa-onnx model files"
+                  v-model="asrConfig.offline_use_vad"
+                  type="checkbox"
+                  class="toggle toggle-primary toggle-sm"
+                  @change="saveConfig"
                 />
-                <button class="btn btn-outline btn-sm" @click="handlePickDirectory">Browse</button>
-              </div>
-              <label class="label">
-                <span class="label-text-alt text-base-content/40">
-                  Directory containing the sherpa-onnx model files (tokens.txt, *.onnx).
-                </span>
+                <span class="label-text font-medium">文件转写使用 VAD 分段</span>
               </label>
+              <p class="text-xs text-base-content/40 ml-11">
+                关闭后，文件转写将整段音频一次性识别，不分段。适合短音频或不需要分段的场景。
+              </p>
+            </div>
+
+            <!-- vad_padding -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">分段前后静音填充 (秒)</span>
+                <span class="label-text-alt text-base-content/50">{{ (asrConfig.vad_padding * 1000).toFixed(0) }}ms</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <span class="text-xs text-base-content/40 w-12 shrink-0">无</span>
+                <input
+                  v-model.number="asrConfig.vad_padding"
+                  type="range"
+                  min="0"
+                  max="3.0"
+                  step="0.1"
+                  class="range range-primary range-xs flex-1"
+                  @change="saveConfig"
+                />
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">3s</span>
+              </label>
+              <p class="label text-base-content/40 text-xs mt-1">
+                在每个 VAD 分段前后添加静音，避免语音截断导致的识别错误。设为 0 关闭。默认 800ms。
+              </p>
+            </div>
+
+            <!-- vad_threshold -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">语音检测阈值</span>
+                <span class="label-text-alt text-base-content/50">{{ asrConfig.vad_threshold.toFixed(3) }}</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <span class="text-xs text-base-content/40 w-12 shrink-0">灵敏</span>
+                <input
+                  v-model.number="vadThresholdRaw"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  class="range range-primary range-xs flex-1"
+                  @change="saveConfig"
+                />
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">严格</span>
+              </label>
+              <p class="label text-base-content/40 text-xs mt-1">
+                语音/静音判定阈值。值越低越灵敏（更容易检测到语音），值越高越严格。0.01-0.10 区间有更精细的控制。默认 0.05。
+              </p>
+            </div>
+
+            <!-- vad_min_silence_duration -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">最小静音时长 (秒)</span>
+                <span class="label-text-alt text-base-content/50">{{ asrConfig.vad_min_silence_duration.toFixed(1) }}s</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <span class="text-xs text-base-content/40 w-12 shrink-0">短</span>
+                <input
+                  v-model.number="asrConfig.vad_min_silence_duration"
+                  type="range"
+                  min="0.1"
+                  max="5.0"
+                  step="0.1"
+                  class="range range-primary range-xs flex-1"
+                  @change="saveConfig"
+                />
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">长</span>
+              </label>
+              <p class="label text-base-content/40 text-xs mt-1">
+                静音超过此时长后，当前语音段将被截断。值越大，越允许说话中的停顿不被切断。实时流式会自动乘以 1.6 倍。
+              </p>
+            </div>
+
+            <!-- vad_min_speech_duration -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">最小语音时长 (秒)</span>
+                <span class="label-text-alt text-base-content/50">{{ asrConfig.vad_min_speech_duration.toFixed(2) }}s</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <span class="text-xs text-base-content/40 w-12 shrink-0">短</span>
+                <input
+                  v-model.number="asrConfig.vad_min_speech_duration"
+                  type="range"
+                  min="0.05"
+                  max="2.0"
+                  step="0.05"
+                  class="range range-primary range-xs flex-1"
+                  @change="saveConfig"
+                />
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">长</span>
+              </label>
+              <p class="label text-base-content/40 text-xs mt-1">
+                短于此时间的语音段将被忽略，用于过滤噪声、咳嗽等短暂声音。
+              </p>
+            </div>
+
+            <!-- vad_max_speech_duration -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">最大语音时长 (秒)</span>
+                <span class="label-text-alt text-base-content/50">{{ asrConfig.vad_max_speech_duration.toFixed(1) }}s</span>
+              </label>
+              <label class="flex items-center gap-3">
+                <span class="text-xs text-base-content/40 w-12 shrink-0">短</span>
+                <input
+                  v-model.number="vadSpeechRaw"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  class="range range-primary range-xs flex-1"
+                  @change="saveConfig"
+                />
+                <span class="text-xs text-base-content/40 w-12 text-right shrink-0">长</span>
+              </label>
+              <p class="label text-base-content/40 text-xs mt-1">
+                单个语音段的最大时长。超过此时长将被强制分段。5-20s 区间精细可调。默认 8s。
+              </p>
             </div>
 
             <!-- Language -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Language</span>
+                <span class="label-text font-medium">识别语言</span>
               </label>
               <select
                 v-model="asrConfig.language"
@@ -1183,7 +1379,7 @@ onUnmounted(() => {
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Language code for ASR. Select from list or choose Custom.
+                  ASR 识别语言代码。从列表选择或自定义。
                 </span>
               </label>
             </div>
@@ -1191,7 +1387,7 @@ onUnmounted(() => {
             <!-- GPU Toggle -->
             <div class="form-control">
               <label class="label cursor-pointer justify-start gap-4">
-                <span class="label-text font-medium">Use GPU</span>
+                <span class="label-text font-medium">启用 GPU</span>
                 <input
                   v-model="asrConfig.use_gpu"
                   type="checkbox"
@@ -1200,7 +1396,52 @@ onUnmounted(() => {
               </label>
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Enable GPU acceleration if available (requires CUDA/OpenCL).
+                  启用 GPU 加速（需要 CUDA/OpenCL 支持）。
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Save button -->
+          <div class="card-actions mt-4 justify-end">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isSaving"
+              @click="saveConfig"
+            >
+              <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
+              保存 Configuration
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模型管理 -->
+    <div v-show="activeTab === 'model-management'" class="space-y-4">
+      <!-- Download & Network Settings Card -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">下载与网络</h2>
+
+          <div class="mt-4 space-y-4">
+            <!-- Model Directory -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">模型目录</span>
+              </label>
+              <div class="flex gap-2">
+                <input
+                  v-model="asrConfig.model_dir"
+                  type="text"
+                  class="input input-bordered flex-1"
+                  placeholder="Path to sherpa-onnx model files"
+                />
+                <button class="btn btn-outline btn-sm" @click="handlePickDirectory">Browse</button>
+              </div>
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  模型文件存放目录（tokens.txt, *.onnx）。
                 </span>
               </label>
             </div>
@@ -1208,7 +1449,7 @@ onUnmounted(() => {
             <!-- Download Source -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Download Source</span>
+                <span class="label-text font-medium">下载源</span>
               </label>
               <select
                 v-model="asrConfig.download_source"
@@ -1223,7 +1464,7 @@ onUnmounted(() => {
             <!-- GitHub Proxy Domain (shown when ghproxy selected) -->
             <div v-if="asrConfig.download_source === 'ghproxy'" class="form-control">
               <label class="label">
-                <span class="label-text font-medium">GitHub Proxy Domain</span>
+                <span class="label-text font-medium">GitHub 代理域名</span>
               </label>
               <input
                 v-model="asrConfig.custom_ghproxy_domain"
@@ -1233,7 +1474,7 @@ onUnmounted(() => {
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  Visit <a href="https://ghproxy.link/" target="_blank" rel="noopener noreferrer" class="link">ghproxy.link</a> to find currently available proxy domains, then paste one here.
+                  访问 <a href="https://ghproxy.link/" target="_blank" rel="noopener noreferrer" class="link">ghproxy.link</a> 查找可用的代理域名。
                 </span>
               </label>
             </div>
@@ -1242,7 +1483,7 @@ onUnmounted(() => {
             <div v-if="asrConfig.download_source === 'modelscope'" class="form-control">
               <label class="label">
                 <span class="label-text-alt text-base-content/50">
-                  ModelScope only provides Alibaba ecosystem models (Paraformer, SenseVoice, FunASR).
+                  ModelScope 仅提供阿里生态模型（Paraformer、SenseVoice、FunASR）。
                 </span>
               </label>
             </div>
@@ -1250,7 +1491,7 @@ onUnmounted(() => {
             <!-- Network Proxy -->
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Network Proxy</span>
+                <span class="label-text font-medium">网络代理</span>
               </label>
               <select
                 v-model="asrConfig.proxy_mode"
@@ -1265,7 +1506,7 @@ onUnmounted(() => {
             <!-- Custom Proxy URL (shown when custom proxy selected) -->
             <div v-if="asrConfig.proxy_mode === 'custom'" class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Proxy URL</span>
+                <span class="label-text font-medium">代理地址</span>
               </label>
               <input
                 v-model="asrConfig.proxy_url"
@@ -1275,7 +1516,7 @@ onUnmounted(() => {
               />
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  HTTP/HTTPS proxy URL, e.g. http://host:port
+                  HTTP/HTTPS 代理地址，例如 http://host:port
                 </span>
               </label>
             </div>
@@ -1289,18 +1530,18 @@ onUnmounted(() => {
               @click="saveConfig"
             >
               <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
-              Save Configuration
+              保存 Configuration
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Model Management: Available Models -->
+      <!-- Available Models -->
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">Available Models</h2>
+          <h2 class="card-title text-base">可用模型</h2>
           <p class="text-sm text-base-content/60">
-            Download ASR models for local speech recognition. VAD model is auto-downloaded with the first ASR model, but can also be manually downloaded here.
+            下载 ASR 模型用于本地语音识别。VAD 模型会在首次下载 ASR 模型时自动下载，也可以在此手动下载。
           </p>
 
           <div class="mt-4 space-y-2">
@@ -1354,10 +1595,10 @@ onUnmounted(() => {
                   <button
                     class="btn btn-ghost btn-xs mt-1 text-error"
                     @click="handleCancelInstall"
-                  >Cancel</button>
+                  >取消</button>
                 </div>
                 <!-- Already installed -->
-                <span v-else-if="isModelInstalled(model.model_id)" class="badge badge-success badge-sm">Installed</span>
+                <span v-else-if="isModelInstalled(model.model_id)" class="badge badge-success badge-sm">已安装</span>
                 <!-- Not available on current source -->
                 <span v-else-if="!isModelAvailableOnSource(model)" class="text-xs text-base-content/40">N/A</span>
                 <!-- Download button -->
@@ -1366,17 +1607,17 @@ onUnmounted(() => {
                   class="btn btn-primary btn-sm"
                   :disabled="!!downloadingModelId"
                   @click="handleInstallModel(model.model_id)"
-                >Download</button>
+                >下载</button>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Model Management: Installed Models -->
+      <!-- Installed Models -->
       <div v-if="installedModels.length > 0" class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">Installed Models</h2>
+          <h2 class="card-title text-base">已安装模型</h2>
           <div class="mt-4 space-y-2">
             <div
               v-for="model in installedModels"
@@ -1405,7 +1646,7 @@ onUnmounted(() => {
               </div>
               <div class="ml-3 flex items-center gap-2 flex-shrink-0">
                 <!-- Activate button (for ASR models, not VAD) -->
-                <template v-if="model.model_id !== 'silero_vad'">
+                <template v-if="model.model_type !== 'vad'">
                   <button
                     v-if="isModelActive(model.model_id, 'streaming') || isModelActive(model.model_id, 'offline')"
                     class="btn btn-ghost btn-xs"
@@ -1414,28 +1655,28 @@ onUnmounted(() => {
                         ? handleSetActiveModel(model.model_id, 'streaming')
                         : handleSetActiveModel(model.model_id, 'offline')
                     "
-                  >Deactivate</button>
+                  >停用</button>
                   <button
                     v-else
                     class="btn btn-outline btn-xs"
                     @click="
-                      model.model_type === 'streaming'
+                      model.model_type === 'streaming' || supportsSimulatedStreaming(model.model_id)
                         ? handleSetActiveModel(model.model_id, 'streaming')
                         : handleSetActiveModel(model.model_id, 'offline')
                     "
-                  >Activate</button>
+                  >启用</button>
                 </template>
                 <!-- Delete button -->
                 <button
                   v-if="deleteConfirmId === model.model_id"
                   class="btn btn-error btn-xs"
                   @click="handleDeleteModel(model.model_id)"
-                >Confirm</button>
+                >确认</button>
                 <button
                   v-else
                   class="btn btn-ghost btn-xs text-error"
                   @click="deleteConfirmId = model.model_id"
-                >Delete</button>
+                >删除</button>
               </div>
             </div>
           </div>
@@ -1445,13 +1686,13 @@ onUnmounted(() => {
       <!-- Related Links -->
       <div class="card bg-base-100 border border-base-300 shadow-md">
         <div class="card-body">
-          <h2 class="card-title text-base">Related Links</h2>
+          <h2 class="card-title text-base">相关链接</h2>
           <p class="text-sm text-base-content/60">
-            External resources for sherpa-onnx models and tools. You can manually download models and place them in the model directory.
+            sherpa-onnx 模型和工具的外部资源。可以手动下载模型并放入模型目录。
           </p>
           <div class="mt-4 space-y-3">
 
-            <div class="divider text-xs">Model Sources</div>
+            <div class="divider text-xs">模型源</div>
 
             <!-- Model source links -->
             <div class="grid grid-cols-1 gap-2">
@@ -1462,7 +1703,7 @@ onUnmounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="btn btn-outline btn-xs"
-                >Open</a>
+                >打开</a>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm">HuggingFace (csukuangfj/models)</span>
@@ -1471,7 +1712,7 @@ onUnmounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="btn btn-outline btn-xs"
-                >Open</a>
+                >打开</a>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm">ModelScope (Alibaba Ecosystem)</span>
@@ -1480,7 +1721,7 @@ onUnmounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="btn btn-outline btn-xs"
-                >Open</a>
+                >打开</a>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm">GitHub Proxy List</span>
@@ -1489,12 +1730,12 @@ onUnmounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="btn btn-outline btn-xs"
-                >Open</a>
+                >打开</a>
               </div>
             </div>
 
-            <div class="divider text-xs">Other Links</div>
-            
+            <div class="divider text-xs">其他工具</div>
+
             <!-- Subtitle generation tools -->
             <div v-for="tool in availableModels.filter(m => m.model_type === 'tool')" :key="tool.model_id">
               <div class="text-sm font-medium">{{ tool.display_name }}</div>
