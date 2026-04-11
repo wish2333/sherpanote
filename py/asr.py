@@ -116,7 +116,6 @@ class SherpaASR:
                     return exact
                 for f in search_dir.iterdir():
                     if f.is_file() and f.name != name and SherpaASR._match_model_file(f.name, name):
-                        logger.debug("Found variant: %s -> %s", name, f.name)
                         return f
         return None
 
