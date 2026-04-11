@@ -602,6 +602,97 @@ class ModelInstaller:
                 **extra,
             })
 
+    def _install_hf_multi(
+        self, entry: ModelEntry, models_dir: Path, is_vad: bool,
+    ) -> dict[str, Any]:
+        """Install a model by downloading individual files from HuggingFace."""
+        from huggingface_hub import hf_hub_download
+
+        assert entry.hf_files is not None, "hf_files must be set for multi-file download"
+
+        model_id = entry.model_id
+        model_dir = models_dir / model_id
+        if model_dir.exists():
+            shutil.rmtree(model_dir)
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        endpoint = (
+            "https://hf-mirror.com" if self._download_source == "hf_mirror"
+            else "https://huggingface.co"
+        )
+        repo_id = entry.hf_repo_id or f"csukuangfj/{model_id}"
+
+        # Proxy setup.
+        old_http_proxy = os.environ.get("HTTP_PROXY")
+        old_https_proxy = os.environ.get("HTTPS_PROXY")
+        proxy_url = self._proxy_url if self._proxy_mode == "custom" else None
+        if proxy_url:
+            os.environ["HTTP_PROXY"] = proxy_url
+            os.environ["HTTPS_PROXY"] = proxy_url
+
+        try:
+            n = len(entry.hf_files)
+            for i, filename in enumerate(entry.hf_files):
+                if self._cancel.is_set():
+                    raise RuntimeError("Download cancelled")
+                pct = int(85 * (i + 1) / n)
+                self._emit_progress("download", pct, file=filename)
+                hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    endpoint=endpoint,
+                    local_dir=str(model_dir),
+                )
+            self._emit_progress("download", 85)
+        except Exception:
+            if model_dir.exists():
+                shutil.rmtree(model_dir)
+            raise
+        finally:
+            if proxy_url:
+                if old_http_proxy is not None:
+                    os.environ["HTTP_PROXY"] = old_http_proxy
+                else:
+                    os.environ.pop("HTTP_PROXY", None)
+                if old_https_proxy is not None:
+                    os.environ["HTTPS_PROXY"] = old_https_proxy
+                else:
+                    os.environ.pop("HTTPS_PROXY", None)
+
+        # Validate.
+        self._emit_progress("validate", 90)
+        validation = validate_model(model_id, models_dir)
+        self._emit_progress("validate", 100)
+
+        if not validation["valid"]:
+            return {
+                "success": False,
+                "error": f"Validation failed. Missing: {validation.get('missing')}",
+                "model_id": model_id,
+            }
+
+        # Auto-download VAD if this is the first ASR model install.
+        if not is_vad:
+            vad_id = "silero_vad_v5"
+            vad_path = models_dir / (vad_id + ".onnx")
+            if not vad_path.exists():
+                vad_entry = get_model(vad_id)
+                if vad_entry and self._download_source in vad_entry.sources:
+                    vad_tmp = models_dir / "_silero_vad_download.tmp"
+                    self._emit_progress("download", 100, sub_phase="vad")
+                    download_model(
+                        vad_entry, self._download_source, vad_tmp,
+                        ghproxy_domain=self._custom_ghproxy_domain,
+                        proxy_mode=self._proxy_mode,
+                        proxy_url=self._proxy_url,
+                        cancel_event=self._cancel,
+                    )
+                    extract_archive(vad_tmp, vad_id, models_dir, is_vad=True)
+                    if vad_tmp.exists():
+                        vad_tmp.unlink()
+
+        return {"success": True, "model_id": model_id}
+
     def _run(self) -> None:
         """Worker thread entry point."""
         model_id = self._model_id
@@ -630,6 +721,10 @@ class ModelInstaller:
             }
 
         is_vad = entry.model_type == "vad"
+
+        # Multi-file HuggingFace download (individual ONNX files, no archive).
+        if entry.hf_files and self._download_source in ("huggingface", "hf_mirror"):
+            return self._install_hf_multi(entry, models_dir, is_vad)
 
         # 1. Download (0-85%).
         self._emit_progress("download", 0)
