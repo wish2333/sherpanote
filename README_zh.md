@@ -6,79 +6,87 @@
 
 SherpaNote 是一款智能语音学习助手，结合了实时语音识别与AI驱动的文本处理功能。录制您的想法、讲座或对话，让 SherpaNote 自动转录并利用AI润色、笔记整理、思维导图和头脑风暴等功能来增强您的内容。
 
-基于 **PyWebVue** 框架构建，SherpaNote 在 Windows、macOS 和 Linux 上提供无缝的桌面体验，同时利用现代 Web 技术为用户界面提供强大支持。
+基于 **PyWebVue** 框架构建，SherpaNote 在 Windows 和 macOS 上提供无缝的桌面体验，同时利用现代 Web 技术为用户界面提供强大支持。
 
-## 🌟 功能特性
+## 功能特性
 
-### 🎙️ 语音识别
-- **实时流式转录**：支持实时部分结果显示
-- **离线音频文件转录**：带进度跟踪的完整音频处理
-- **多语言支持**：中文、英文及自动检测
-- **GPU加速**：支持更快的处理速度
-- **多种ASR模型**：包括 Paraformer 和 Whisper 等变体
+### 语音识别
+- **实时流式转录**：基于 Zipformer/Paraformer 在线模型的实时部分结果显示
+- **离线音频文件转录**：基于 VAD 的语音分段切割与进度追踪
+- **模拟流式识别**：VAD + 离线模型管线，为仅支持离线的模型（SenseVoice、Qwen3-ASR、Cohere Transcribe）提供实时显示能力
+- **多语言支持**：14 种语言，包括中文、英文、日文、韩文、粤语等
+- **10+ ASR 模型**：来自多个提供商（Paraformer、SenseVoice、Whisper、Qwen3-ASR、FunASR Nano、Cohere Transcribe）
+- **自动模型类型检测**：基于文件启发式规则的流式/离线/模拟流式分类，支持用户自行下载的模型
+- **可配置 VAD**：可调节的语音活动检测参数（阈值、静音/语音时长、最大语音时长）
+- **macOS 音频兼容**：AudioContext 重采样、静音检测与用户警告、重试逻辑
 
-### 🤖 AI处理
+### AI 处理
 - **文本润色**：优化和改进转录文本
 - **智能笔记**：将原始转录转换为结构化笔记
-- **思维导图**：从内容生成可视化思维导图
-- **头脑风暴**：通过AI生成建议扩展思路
-- **流式响应**：实时AI令牌流式传输，即时反馈
+- **思维导图**：从内容生成可视化思维导图（Markmap/Mermaid 格式）
+- **头脑风暴**：通过 AI 生成建议扩展思路
+- **流式响应**：实时 AI 令牌流式传输，支持截断检测和"继续输出"恢复
+- **自定义 AI 预设**：用户自定义处理模板，支持自定义提示词
+- **多供应商 API 管理**：配置多个 AI 供应商（OpenAI 兼容、OpenRouter），支持连接测试
+- **转录后自动 AI 处理**：转录完成后自动执行选定的 AI 处理模式
 
-### 💾 数据管理
-- **持久化存储**：所有记录通过SQLite数据库本地保存
-- **版本历史**：跟踪变更并恢复历史版本
-- **音频持久化**：录制的音频文件存储在结构化目录中
+### 数据管理
+- **持久化存储**：所有记录通过 SQLite 数据库（WAL 模式）本地保存
+- **版本历史**：手动版本快照，支持恢复、内容差异脏检测和可配置的保留上限
+- **音频管理**：专用音频文件管理视图，重新转录，灵活的录制/导入工作流
 - **搜索功能**：通过标题或转录文本中的关键词查找记录
-- **导入/导出**：支持Markdown、TXT、DOCX和SRT格式
+- **导入/导出**：支持 Markdown、TXT、DOCX 和 SRT 格式
 
-### 🔧 模型管理
-- **模型注册表**：浏览可用的ASR模型及详细信息
-- **一键安装**：直接从应用内下载和安装模型
-- **自定义镜像**：配置自定义下载源以获得更快访问
-- **模型验证**：安装后验证模型完整性
-- **活跃模型选择**：选择用于流式/离线识别的模型
+### 模型管理
+- **多源下载**：GitHub、HuggingFace、HF-Mirror、GitHub Proxy 和魔搭社区
+- **代理支持**：不使用代理 / 系统代理 / 自定义代理
+- **模型目录**：10+ 精选 ASR 模型，标注大小、语言和下载源可用性
+- **一键安装**：直接从应用内下载、安装、验证模型
+- **自定义模型支持**：放入模型目录的任何 sherpa-onnx 兼容模型都会被自动检测
+- **相关链接**：快速访问模型源、字幕生成工具和文档
 
-### 🎨 用户体验
-- **响应式设计**：基于Vue 3和Tailwind CSS的美观现代界面
+### 用户体验
+- **Notion 风格设计**：基于 Vue 3 + DaisyUI 5 + Tailwind CSS 4 的简洁现代界面
 - **深色/浅色模式**：自动主题切换，支持系统偏好检测
-- **原生文件对话框**：平台原生的文件和文件夹选择器
-- **拖拽操作**：通过拖拽轻松导入音频文件
-- **键盘快捷键**：高效的键盘导航工作流
+- **中文界面**：完整的中文本地化
+- **可折叠面板**：转录文本和音频播放器区域可折叠以获得更多工作空间
+- **原生文件对话框**：通过 pywebview 实现平台原生的文件和文件夹选择器
 
-## 🛠️ 技术栈
+## 技术栈
 
 ### 后端 (Python)
 - **Python 3.10+**：核心应用逻辑
-- **sherpa-onnx**：离线语音识别引擎
-- **OpenAI API**：AI文本处理和生成
-- **pywebview**：原生桌面窗口管理
-- **SQLite**：本地数据持久化
-- **uv**：快速的Python包管理和执行工具
+- **sherpa-onnx**：本地优先的语音识别引擎（Paraformer、SenseVoice、Whisper、Qwen3-ASR、FunASR Nano、Cohere Transcribe）
+- **OpenAI 兼容 API**：AI 文本处理和生成（支持 OpenRouter 和自定义端点）
+- **pywebview**：原生桌面窗口管理（通过 PyWebVue 框架）
+- **SQLite（WAL 模式）**：带原子事务的本地数据持久化
+- **uv**：快速的 Python 包管理和执行工具
 
 ### 前端 (Vue.js)
 - **Vue 3**：响应式用户界面框架
-- **TypeScript**：类型安全的JavaScript开发
+- **TypeScript**：类型安全的 JavaScript 开发
 - **Vite**：极速开发服务器和构建工具
-- **Tailwind CSS**：实用优先的CSS框架
-- **DaisyUI**：带有内置主题的美观组件库
-- **Pinia**：Vue应用程序的状态管理
+- **Tailwind CSS 4**：实用优先的 CSS 框架
+- **DaisyUI 5**：带有内置主题的美观组件库
+- **Pinia**：Vue 应用程序的状态管理
+- **Web Audio API**：基于浏览器的音频采集，PCM 流式传输至后端
 
 ### 构建与部署
-- **PyInstaller**：桌面应用程序打包
-- **Buildozer**：Android APK生成（仅限macOS/Linux）
-- **跨平台**：单一代码库支持Windows、macOS、Linux和Android
+- **PyInstaller**：桌面应用程序打包（onedir/onefile）
+- **跨平台**：单一代码库支持 Windows 和 macOS
+- **bun**：前端包管理
 
-## 🚀 快速开始
+## 快速开始
 
 ### 先决条件
 - **Python 3.10 或更高版本**
 - **uv** 包管理器：[安装 uv](https://docs.astral.sh/uv/getting-started/installation/)
-- **bun**、**npm** 或 **yarn** 用于前端依赖
+- **bun** 用于前端依赖
 
 ### 安装
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/sherpanote.git
+git clone https://github.com/wish2333/sherpanote.git
 cd sherpanote
 
 # 安装依赖并启动开发服务器
@@ -97,7 +105,7 @@ uv run dev.py --setup
 uv run dev.py --no-vite
 ```
 
-## 📦 构建与打包
+## 构建与打包
 
 ### 桌面应用程序
 ```bash
@@ -114,15 +122,7 @@ uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
 uv run build.py --clean
 ```
 
-### Android APK（仅限macOS/Linux）
-```bash
-# 构建Android APK
-uv run build.py --android
-```
-
-> **注意**：Android构建需要macOS或Linux系统。Windows用户可以使用WSL或Docker。
-
-## 🎯 使用指南
+## 使用指南
 
 ### 录制音频
 1. 点击主界面中的**录制**按钮
@@ -130,56 +130,83 @@ uv run build.py --android
 3. 完成后点击**停止**
 4. 您的录音将自动保存，包含音频文件和转录文本
 
-### AI处理
+### AI 处理
 1. 从列表中选择任意记录
-2. 选择AI模式：**润色**、**笔记**、**思维导图**或**头脑风暴**
+2. 选择 AI 模式：**润色**、**笔记**、**思维导图**或**头脑风暴**
 3. 点击**处理**以增强您的内容
-4. 实时查看AI令牌流式传输的结果
+4. 实时查看 AI 令牌流式传输的结果
 
 ### 管理模型
-1. 进入**设置** → **ASR引擎**
-2. 在**模型管理**部分浏览可用模型
-3. 点击**下载**安装模型
-4. 使用下拉菜单设置活跃的流式和离线模型
+1. 进入**设置** > **模型设置**进行活跃模型选择和 VAD 参数配置
+2. 进入**设置** > **模型管理**浏览、下载和安装模型
+3. 模型会自动分类为流式/离线，并出现在对应的下拉框中
 
 ### 导入与导出
-- **导入**：拖拽 `.md` 或 `.txt` 文件，或使用导入按钮
-- **导出**：右键点击任意记录并选择导出格式（MD、TXT、DOCX、SRT）
+- **导入**：拖拽音频文件，或使用导入按钮将文件复制到管理的音频目录中
+- **导出**：使用编辑器视图中的导出菜单（MD、TXT、DOCX、SRT 格式）
 
-## 📁 项目结构
+## 项目结构
 
 ```
 sherpanote/
 ├── frontend/           # Vue.js 前端应用程序
-│   ├── src/            # 源代码
-│   │   ├── components/ # Vue 组件
-│   │   ├── views/      # 页面视图
-│   │   ├── composables/# Vue 组合式函数
-│   │   └── stores/     # Pinia 状态存储
+│   ├── src/
+│   │   ├── components/ # 可复用 UI 组件
+│   │   │   ├── AiProcessor.vue       # AI 处理控制面板
+│   │   │   ├── AudioRecorder.vue     # 麦克风录制（含静音检测）
+│   │   │   ├── ExportMenu.vue        # 多格式导出下拉菜单
+│   │   │   ├── RecordCard.vue        # 记录列表项
+│   │   │   ├── SearchBar.vue         # 关键词搜索和筛选
+│   │   │   ├── TranscriptPanel.vue   # 转录文本显示和编辑
+│   │   │   ├── VersionHistory.vue    # 版本列表（恢复/删除）
+│   │   │   ├── MindMapPreview.vue    # Mermaid 思维导图渲染
+│   │   │   ├── MarkdownRenderer.vue  # Markdown 内容渲染
+│   │   │   └── ThemeToggle.vue       # 深色/浅色模式切换
+│   │   ├── views/
+│   │   │   ├── HomeView.vue          # 记录列表（搜索/筛选）
+│   │   │   ├── RecordView.vue        # 录音和文件转录
+│   │   │   ├── EditorView.vue        # 转录编辑 + AI 处理
+│   │   │   ├── SettingsView.vue      # 完整设置（通用、模型、AI、ASR 选项卡）
+│   │   │   └── AudioManageView.vue   # 音频文件管理
+│   │   ├── composables/
+│   │   │   ├── useRecording.ts       # 音频采集、重采样、静音检测
+│   │   │   ├── useTranscript.ts      # 转录事件处理
+│   │   │   ├── useAiProcess.ts       # AI 流式传输和结果管理
+│   │   │   └── useStorage.ts         # CRUD 操作和版本控制
+│   │   ├── stores/
+│   │   │   └── appStore.ts           # 全局状态（配置、模型、设置）
+│   │   ├── bridge.ts                 # PyWebVue 桥接：call()、onEvent()
+│   │   └── types.ts                  # TypeScript 类型定义
+│   └── index.html
 ├── py/                 # Python 后端模块
-│   ├── asr.py          # 语音识别逻辑
-│   ├── llm.py          # AI 处理逻辑
-│   ├── storage.py      # 数据持久化
-│   └── model_manager.py # 模型管理
+│   ├── asr.py                 # ASR 引擎（流式/离线/模拟流式）
+│   ├── llm.py                 # AI 文本处理（流式）
+│   ├── config.py              # 应用配置管理
+│   ├── storage.py             # SQLite 持久化 + 版本控制
+│   ├── model_manager.py       # 模型下载、安装、验证（5 种源）
+│   ├── model_registry.py      # 模型目录（10+ 模型）
+│   ├── presets.py             # AI API 预设管理
+│   ├── processing_presets.py  # AI 处理模板管理
+│   └── io.py                  # 音频 I/O 工具
 ├── pywebvue/           # PyWebVue 框架核心
-├── main.py             # 应用程序入口点
+├── main.py             # 应用程序入口 + Bridge API
 ├── dev.py              # 开发启动脚本
 ├── build.py            # 构建和打包脚本
 └── app.spec            # PyInstaller 配置
 ```
 
-## ⚙️ 配置
+## 配置
 
-SherpaNote 使用存储在SQLite中的持久化配置系统。关键配置选项包括：
+SherpaNote 使用存储在 SQLite 中的持久化配置系统。关键配置选项包括：
 
-- **数据目录**：音频文件和数据库的存储位置
-- **ASR设置**：模型目录、采样率、GPU使用、镜像URL
-- **AI设置**：OpenAI API密钥、模型选择、温度参数
-- **UI偏好**：主题、语言、默认视图
+- **通用**：数据目录、最大版本历史数、自动标点、转录后自动 AI 处理
+- **模型设置**：活跃流式/离线模型、语言、GPU 开关、VAD 参数（阈值、静音/语音时长）
+- **AI 设置**：API 预设（名称、Base URL、密钥、模型）、处理预设（名称、模式、提示词模板）、温度、最大令牌数、自动最大令牌数
+- **模型管理**：下载源、代理设置、模型目录
 
-配置可以通过**设置**界面或通过API以编程方式修改。
+配置可以通过**设置**界面修改。
 
-## 🤝 贡献指南
+## 贡献指南
 
 我们欢迎贡献！以下是参与步骤：
 
@@ -191,31 +218,29 @@ SherpaNote 使用存储在SQLite中的持久化配置系统。关键配置选项
 
 ### 开发准则
 - 遵循现有的代码风格和模式
-- 编写有意义的提交消息
-- 在可能的情况下为新功能包含测试
+- 编写有意义的提交消息（conventional commits 格式）
+- 确保跨平台兼容性（Windows + macOS）
 - 为新功能更新文档
-- 确保跨平台兼容性
 
 ### 报告问题
-报告bug或请求功能时，请包含：
+报告 bug 或请求功能时，请包含：
 - 您的操作系统及版本
-- Python版本
+- Python 版本
 - 复现问题的步骤
 - 期望行为 vs 实际行为
 - 任何错误消息或日志
 
-## 📄 许可证
+## 许可证
 
-本项目采用MIT许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
+本项目采用 MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
 
-## 🙏 致谢
+## 致谢
 
-- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：离线语音识别工具包
-- **[pywebview](https://github.com/r0x0r/pywebview)**：跨平台原生GUI库
-- **[Vue.js](https://vuejs.org/)**：渐进式JavaScript框架
-- **[Tailwind CSS](https://tailwindcss.com/)**：实用优先的CSS框架
-- **[DaisyUI](https://daisyui.com/)**：Tailwind CSS的组件库
-
----
-
-由 SherpaNote 团队用心打造。快乐学习！
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：新一代语音识别工具包
+- **[pywebview](https://github.com/r0x0r/pywebview)**：跨平台原生 GUI 库
+- **[PyWebVue](https://github.com/nicepkg/pywebvue)**：Vue + pywebview 桌面应用框架
+- **[Vue.js](https://vuejs.org/)**：渐进式 JavaScript 框架
+- **[Tailwind CSS](https://tailwindcss.com/)**：实用优先的 CSS 框架
+- **[DaisyUI](https://daisyui.com/)**：Tailwind CSS 组件库
+- **[Hugging Face](https://huggingface.co/)**：开源模型托管平台
+- **[魔搭社区](https://www.modelscope.cn/)**：阿里巴巴模型社区

@@ -1,4 +1,4 @@
-# SherpaNote - AI-powered Voice Learning Assistant
+# SherpaNote - AI-Powered Voice Learning Assistant
 
 ![SherpaNote Screenshot](reference/preview.png)
 
@@ -6,79 +6,87 @@
 
 SherpaNote is an intelligent voice learning assistant that combines real-time speech recognition with AI-powered text processing. Record your thoughts, lectures, or conversations, and let SherpaNote automatically transcribe and enhance your content with AI polishing, note organization, mind mapping, and brainstorming capabilities.
 
-Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop experience with native performance across Windows, macOS, and Linux, while leveraging the power of modern web technologies for the user interface.
+Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop experience with native performance across Windows and macOS, while leveraging the power of modern web technologies for the user interface.
 
-## 🌟 Features
+## Features
 
-### 🎙️ Speech Recognition
-- **Real-time streaming transcription** with live partial results
-- **Offline audio file transcription** with progress tracking
-- **Multi-language support** (Chinese, English, and auto-detection)
-- **GPU acceleration** support for faster processing
-- **Multiple ASR models** including Paraformer and Whisper variants
+### Speech Recognition
+- **Real-time streaming transcription** with live partial results (Zipformer/Paraformer online models)
+- **Offline audio file transcription** with VAD-based segmentation and progress tracking
+- **Simulated streaming** - VAD + offline model pipeline enabling real-time display for offline-only models (SenseVoice, Qwen3-ASR, Cohere Transcribe)
+- **Multi-language support** - 14 languages including Chinese, English, Japanese, Korean, Cantonese, and more
+- **10+ ASR models** from multiple providers (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
+- **Automatic model type detection** - streaming/offline/simulated-streaming classification based on file heuristics, supporting user-downloaded models
+- **Configurable VAD** - tunable voice activity detection parameters (threshold, silence/speech duration, max speech duration)
+- **macOS audio compatibility** - AudioContext resampling, silence detection with user warnings, and retry logic
 
-### 🤖 AI Processing
+### AI Processing
 - **Text polishing**: Refine and improve your transcribed text
 - **Smart notes**: Convert raw transcripts into organized notes
-- **Mind mapping**: Generate visual mind maps from your content
+- **Mind mapping**: Generate visual mind maps (Markmap/Mermaid) from your content
 - **Brainstorming**: Expand on ideas with AI-generated suggestions
-- **Streaming responses**: Real-time AI token streaming for immediate feedback
+- **Streaming responses**: Real-time AI token streaming with truncation detection and "Continue" recovery
+- **Custom AI presets**: User-defined processing templates with custom prompts
+- **Multi-provider API management**: Configure multiple AI providers (OpenAI-compatible, OpenRouter) with connection testing
+- **Auto AI processing**: Automatically run selected AI modes after transcription completes
 
-### 💾 Data Management
-- **Persistent storage**: All records saved locally with SQLite database
-- **Version history**: Track changes and restore previous versions
-- **Audio persistence**: Recorded audio files stored in organized directory structure
+### Data Management
+- **Persistent storage**: All records saved locally with SQLite database (WAL mode)
+- **Version history**: Manual version snapshots with restore, content-diff dirty detection, and configurable retention limits
+- **Audio management**: Dedicated audio file management view, re-transcription, flexible recording/import workflows
 - **Search functionality**: Find records by keywords in title or transcript
 - **Import/Export**: Support for Markdown, TXT, DOCX, and SRT formats
 
-### 🔧 Model Management
-- **Model registry**: Browse available ASR models with detailed information
-- **One-click installation**: Download and install models directly from the app
-- **Custom mirrors**: Configure custom download sources for faster access
-- **Model validation**: Verify model integrity after installation
-- **Active model selection**: Choose which models to use for streaming/offline recognition
+### Model Management
+- **Multi-source download**: GitHub, HuggingFace, HF-Mirror, GitHub Proxy, and ModelScope
+- **Proxy support**: None / System proxy / Custom proxy with configurable settings
+- **Model catalog**: 10+ curated ASR models with size, language, and source availability badges
+- **One-click installation**: Download, install, validate models directly from the app
+- **Custom model support**: Any sherpa-onnx compatible model placed in the models directory is auto-detected
+- **Related links**: Quick access to model sources, subtitle generation tools, and documentation
 
-### 🎨 User Experience
-- **Responsive design**: Beautiful, modern interface built with Vue 3 and Tailwind CSS
+### User Experience
+- **Notion-inspired design**: Clean, modern interface built with Vue 3 and DaisyUI 5 + Tailwind CSS 4
 - **Dark/light mode**: Automatic theme switching with system preference detection
-- **Native file dialogs**: Platform-native file and folder pickers
-- **Drag & drop**: Easy audio file import via drag and drop
-- **Keyboard shortcuts**: Efficient workflow with keyboard navigation
+- **Chinese UI localization**: Full Chinese interface
+- **Collapsible panels**: Transcript and audio player sections can be collapsed for more workspace
+- **Native file dialogs**: Platform-native file and folder pickers via pywebview
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 ### Backend (Python)
 - **Python 3.10+**: Core application logic
-- **sherpa-onnx**: Offline speech recognition engine
-- **OpenAI API**: AI text processing and generation
-- **pywebview**: Native desktop window management
-- **SQLite**: Local data persistence
+- **sherpa-onnx**: Local-first speech recognition engine (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
+- **OpenAI-compatible API**: AI text processing and generation (supports OpenRouter and custom endpoints)
+- **pywebview**: Native desktop window management (via PyWebVue framework)
+- **SQLite (WAL mode)**: Local data persistence with atomic transactions
 - **uv**: Fast Python package management and execution
 
 ### Frontend (Vue.js)
 - **Vue 3**: Reactive user interface framework
 - **TypeScript**: Type-safe JavaScript development
 - **Vite**: Blazing fast development server and build tool
-- **Tailwind CSS**: Utility-first CSS framework
-- **DaisyUI**: Beautiful component library with built-in theming
+- **Tailwind CSS 4**: Utility-first CSS framework
+- **DaisyUI 5**: Beautiful component library with built-in theming
 - **Pinia**: State management for Vue applications
+- **Web Audio API**: Browser-based audio capture with PCM streaming to backend
 
 ### Build & Deployment
-- **PyInstaller**: Desktop application packaging
-- **Buildozer**: Android APK generation (macOS/Linux only)
-- **Cross-platform**: Single codebase for Windows, macOS, Linux, and Android
+- **PyInstaller**: Desktop application packaging (onedir/onefile)
+- **Cross-platform**: Single codebase for Windows and macOS
+- **bun**: Frontend package management
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - **Python 3.10 or higher**
 - **uv** package manager: [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
-- **bun**, **npm**, or **yarn** for frontend dependencies
+- **bun** for frontend dependencies
 
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/sherpanote.git
+git clone https://github.com/wish2333/sherpanote.git
 cd sherpanote
 
 # Install dependencies and start development server
@@ -97,7 +105,7 @@ uv run dev.py --setup
 uv run dev.py --no-vite
 ```
 
-## 📦 Building & Packaging
+## Building & Packaging
 
 ### Desktop Applications
 ```bash
@@ -114,15 +122,7 @@ uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
 uv run build.py --clean
 ```
 
-### Android APK (macOS/Linux only)
-```bash
-# Build Android APK
-uv run build.py --android
-```
-
-> **Note**: Android builds require macOS or Linux. Windows users can use WSL or Docker.
-
-## 🎯 Usage Guide
+## Usage Guide
 
 ### Recording Audio
 1. Click the **Record** button in the main interface
@@ -137,49 +137,76 @@ uv run build.py --android
 4. View results in real-time as AI tokens stream in
 
 ### Managing Models
-1. Go to **Settings** → **ASR Engine**
-2. Browse available models in the **Model Management** section
-3. Click **Download** to install models
-4. Use dropdowns to set active streaming and offline models
+1. Go to **Settings** > **Model Settings** for active model selection and VAD parameters
+2. Go to **Settings** > **Model Management** to browse, download, and install models
+3. Models are automatically classified as streaming/offline and appear in the correct dropdowns
 
 ### Importing & Exporting
-- **Import**: Drag and drop `.md` or `.txt` files, or use the import button
-- **Export**: Right-click any record and choose export format (MD, TXT, DOCX, SRT)
+- **Import**: Drag and drop audio files, or use the import button to copy files into the managed audio directory
+- **Export**: Use the export menu in the editor view (MD, TXT, DOCX, SRT formats)
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 sherpanote/
 ├── frontend/           # Vue.js frontend application
-│   ├── src/            # Source code
-│   │   ├── components/ # Vue components
-│   │   ├── views/      # Page views
-│   │   ├── composables/# Vue composables
-│   │   └── stores/     # Pinia stores
+│   ├── src/
+│   │   ├── components/ # Reusable UI components
+│   │   │   ├── AiProcessor.vue       # AI processing control panel
+│   │   │   ├── AudioRecorder.vue     # Microphone recording with silence detection
+│   │   │   ├── ExportMenu.vue        # Multi-format export dropdown
+│   │   │   ├── RecordCard.vue        # Record list item
+│   │   │   ├── SearchBar.vue         # Keyword search and filter
+│   │   │   ├── TranscriptPanel.vue   # Transcript display and editing
+│   │   │   ├── VersionHistory.vue    # Version list with restore/delete
+│   │   │   ├── MindMapPreview.vue    # Mermaid mind map renderer
+│   │   │   ├── MarkdownRenderer.vue  # Markdown content renderer
+│   │   │   └── ThemeToggle.vue       # Dark/light mode switch
+│   │   ├── views/
+│   │   │   ├── HomeView.vue          # Record list with search/filter
+│   │   │   ├── RecordView.vue        # Recording and file transcription
+│   │   │   ├── EditorView.vue        # Transcript editing + AI processing
+│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR tabs)
+│   │   │   └── AudioManageView.vue   # Audio file management
+│   │   ├── composables/
+│   │   │   ├── useRecording.ts       # Audio capture, resampling, silence detection
+│   │   │   ├── useTranscript.ts      # Transcription event handling
+│   │   │   ├── useAiProcess.ts       # AI streaming and result management
+│   │   │   └── useStorage.ts         # CRUD operations and version control
+│   │   ├── stores/
+│   │   │   └── appStore.ts           # Global state (config, models, settings)
+│   │   ├── bridge.ts                 # PyWebVue bridge: call(), onEvent()
+│   │   └── types.ts                  # TypeScript type definitions
+│   └── index.html
 ├── py/                 # Python backend modules
-│   ├── asr.py          # Speech recognition logic
-│   ├── llm.py          # AI processing logic
-│   ├── storage.py      # Data persistence
-│   └── model_manager.py # Model management
+│   ├── asr.py                 # ASR engine (streaming/offline/simulated streaming)
+│   ├── llm.py                 # AI text processing with streaming
+│   ├── config.py              # App configuration management
+│   ├── storage.py             # SQLite persistence + version control
+│   ├── model_manager.py       # Model download, install, validate (5 sources)
+│   ├── model_registry.py      # Model catalog (10+ models)
+│   ├── presets.py             # AI API preset management
+│   ├── processing_presets.py  # AI processing template management
+│   └── io.py                  # Audio I/O utilities
 ├── pywebvue/           # PyWebVue framework core
-├── main.py             # Application entry point
+├── main.py             # Application entry point + Bridge API
 ├── dev.py              # Development startup script
 ├── build.py            # Build and packaging script
 └── app.spec            # PyInstaller configuration
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 SherpaNote uses a persistent configuration system stored in SQLite. Key configuration options include:
 
-- **Data Directory**: Where audio files and database are stored
-- **ASR Settings**: Model directory, sample rate, GPU usage, mirror URL
-- **AI Settings**: OpenAI API key, model selection, temperature
-- **UI Preferences**: Theme, language, default view
+- **General**: Data directory, max version history, auto punctuation, auto AI processing
+- **Model Settings**: Active streaming/offline model, language, GPU toggle, VAD parameters (threshold, silence/speech duration)
+- **AI Settings**: API presets (name, base URL, key, model), processing presets (name, mode, prompt template), temperature, max tokens, auto max tokens
+- **Model Management**: Download source, proxy settings, model directory
 
-Configuration can be modified through the **Settings** interface or programmatically via the API.
+Configuration can be modified through the **Settings** interface.
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Here's how to get started:
 
@@ -191,10 +218,9 @@ We welcome contributions! Here's how to get started:
 
 ### Development Guidelines
 - Follow the existing code style and patterns
-- Write meaningful commit messages
-- Include tests for new functionality when possible
+- Write meaningful commit messages (conventional commits format)
+- Ensure cross-platform compatibility (Windows + macOS)
 - Update documentation for new features
-- Ensure cross-platform compatibility
 
 ### Reporting Issues
 When reporting bugs or requesting features, please include:
@@ -204,18 +230,17 @@ When reporting bugs or requesting features, please include:
 - Expected vs actual behavior
 - Any error messages or logs
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Offline speech recognition toolkit
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Next-generation speech recognition toolkit
 - **[pywebview](https://github.com/r0x0r/pywebview)**: Cross-platform native GUI library
+- **[PyWebVue](https://github.com/nicepkg/pywebvue)**: Vue + pywebview desktop framework
 - **[Vue.js](https://vuejs.org/)**: Progressive JavaScript framework
 - **[Tailwind CSS](https://tailwindcss.com/)**: Utility-first CSS framework
 - **[DaisyUI](https://daisyui.com/)**: Component library for Tailwind CSS
-
----
-
-Made with ❤️ by the SherpaNote team. Happy learning!
+- **[Hugging Face](https://huggingface.co/)**: Open-source model hosting platform
+- **[ModelScope](https://www.modelscope.cn/)**: Model community by Alibaba
