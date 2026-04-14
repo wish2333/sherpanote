@@ -1,5 +1,5 @@
 /** Core bridge functions for communicating with the Python backend. */
-import type { ModelEntry, InstalledModel } from "./types";
+import type { GpuStatus, WhisperBinaryStatus, ModelEntry, InstalledModel } from "./types";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -116,4 +116,28 @@ export function validateModel(modelId: string) {
 
 export function getDownloadLinks(modelId: string) {
   return call<Array<{ label: string; url: string }>>("get_download_links", modelId);
+}
+
+// ------------------------------------------------------------------ //
+//  GPU detection API helper                                          //
+// ------------------------------------------------------------------ //
+
+export function detectGpu() {
+  return call<GpuStatus>("detect_gpu");
+}
+
+// ------------------------------------------------------------------ //
+//  whisper.cpp binary management API helpers                        //
+// ------------------------------------------------------------------ //
+
+export function getWhisperBinaryStatus() {
+  return call<WhisperBinaryStatus>("get_whisper_binary_status");
+}
+
+export function installWhisperBinary(variant?: string) {
+  return call("install_whisper_binary", variant ?? null);
+}
+
+export function uninstallWhisperBinary() {
+  return call("uninstall_whisper_binary");
 }

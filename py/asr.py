@@ -729,7 +729,7 @@ class SherpaASR:
     def transcribe_file(
         self,
         path: str,
-        on_progress: Callable[[int], None] | None = None,
+        on_progress: Callable[[int, dict[str, Any] | None], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Transcribe an audio file using the offline recognizer.
 
@@ -742,7 +742,8 @@ class SherpaASR:
 
         Args:
             path: Path to the audio file (mp3, wav, m4a, flac).
-            on_progress: Callback invoked with percent (0-100).
+            on_progress: Callback(percent, info) where info is optional
+                dict with 'current' and 'total' segment counts.
 
         Returns:
             List of segment dicts with 'text', 'start_time', 'end_time'.
@@ -761,13 +762,13 @@ class SherpaASR:
             logger.info("offline_use_vad=False, transcribing entire audio without VAD segmentation")
             # Transcribe entire audio without VAD segmentation.
             if on_progress:
-                on_progress(20)
+                on_progress(20, {"current": 0, "total": 1})
             stream = self._offline_recognizer.create_stream()
             stream.accept_waveform(16000, samples)
             self._offline_recognizer.decode_stream(stream)
             text = stream.result.text.strip()
             if on_progress:
-                on_progress(100)
+                on_progress(100, {"current": 1, "total": 1})
             if text:
                 return [
                     {
@@ -794,24 +795,28 @@ class SherpaASR:
                 vad.accept_waveform(chunk)
 
         if on_progress:
-            on_progress(20)
+            on_progress(20, None)
 
-        # Transcribe each speech segment.
-        segments: list[dict[str, Any]] = []
-        segment_idx = 0
-
+        # Pre-drain all VAD segments to get total count for accurate progress.
+        vad_segments: list[tuple[Any, int]] = []
         while not vad.empty():
             speech = vad.front
-
             # Extract data BEFORE pop() -- pop() invalidates the
             # underlying C++ object, making speech.samples empty.
             speech_samples = speech.samples
             speech_start = speech.start
             vad.pop()
-
             if len(speech_samples) < 160:  # Skip very short segments (< 10ms).
                 continue
+            vad_segments.append((speech_samples, speech_start))
 
+        total_segments = len(vad_segments)
+
+        # Transcribe each speech segment.
+        segments: list[dict[str, Any]] = []
+        segment_idx = 0
+
+        for speech_samples, speech_start in vad_segments:
             speech_samples, speech_start = self._pad_segment(speech_samples, speech_start, total_samples=len(samples))
 
             stream = self._offline_recognizer.create_stream()
@@ -835,13 +840,16 @@ class SherpaASR:
 
             segment_idx += 1
 
-            # Report progress (20-90 range for transcription phase).
-            if on_progress and segment_idx % 3 == 0:
-                progress = 20 + int(70 * min(segment_idx / max(segment_idx + 5, 1), 1.0))
-                on_progress(min(progress, 90))
+            # Report progress with segment info (20-90 range for transcription phase).
+            if on_progress and total_segments > 0:
+                progress = 20 + int(70 * segment_idx / total_segments)
+                on_progress(
+                    min(progress, 90),
+                    {"current": segment_idx, "total": total_segments},
+                )
 
         if on_progress:
-            on_progress(100)
+            on_progress(100, {"current": total_segments, "total": total_segments})
 
         return segments
 

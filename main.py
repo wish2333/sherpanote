@@ -52,6 +52,7 @@ class SherpaNoteAPI(Bridge):
         ensure_data_dir(self._config.data_dir)
         self._storage = Storage()
         self._asr: SherpaASR | None = None
+        self._whisper_asr: "WhisperCppASR | None" = None
         self._ai: AIProcessor | None = None
         self._preset_store = AiPresetStore()
         self._processing_preset_store = ProcessingPresetStore()
@@ -154,6 +155,20 @@ class SherpaNoteAPI(Bridge):
             vad_padding=self._config.asr.vad_padding,
             active_vad_model=self._config.asr.active_vad_model,
         )
+
+    @expose
+    def detect_gpu(self) -> dict:
+        """Detect NVIDIA GPU and CUDA availability for sherpa-onnx."""
+        from py.gpu_detect import detect_gpu
+
+        status = detect_gpu()
+        return {"success": True, "data": {
+            "available": status.available,
+            "gpu_name": status.gpu_name,
+            "cuda_version": status.cuda_version,
+            "reason": status.reason,
+            "onnx_provider": status.onnx_provider,
+        }}
 
     @expose
     def init_model(self, language: str | None = None) -> dict:
@@ -263,25 +278,41 @@ class SherpaNoteAPI(Bridge):
         Completion is reported via 'transcribe_complete' event.
         """
         logger.info("transcribe_file called for: %s", file_path)
-        if self._asr is None:
+
+        use_whisper = self._config.asr.asr_backend == "whisper-cpp"
+        if use_whisper and self._get_whisper_asr() is None:
+            return {"success": False, "error": "whisper.cpp backend not configured. Please install binary and model."}
+        if not use_whisper and self._asr is None:
             self._asr = SherpaASR(self._make_asr_config())
 
-        def on_progress(percent: int) -> None:
-            self._emit("transcribe_progress", {"percent": percent})
+        def on_progress(percent: int, info: dict | None = None) -> None:
+            payload: dict = {"percent": percent}
+            if info:
+                payload["segments"] = info
+            self._emit("transcribe_progress", payload)
 
         def _work() -> None:
             import traceback
             logger.info("transcribe_file background thread started")
             try:
-                # Ensure offline recognizer is created on main thread
-                if self._asr._offline_recognizer is None:
-                    logger.info("Scheduling offline recognizer creation on main thread")
-                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
-                    logger.info("Offline recognizer creation completed")
+                if use_whisper:
+                    # whisper.cpp backend (no main-thread recognizer needed).
+                    whisper = self._get_whisper_asr()
+                    if whisper is None:
+                        raise RuntimeError("whisper.cpp ASR not available")
+                    logger.info("Starting whisper.cpp transcribe_file for: %s", file_path)
+                    segments = whisper.transcribe_file(file_path, on_progress=on_progress)
+                else:
+                    # sherpa-onnx backend.
+                    if self._asr is None:
+                        raise RuntimeError("sherpa-onnx ASR not initialized")
+                    if self._asr._offline_recognizer is None:
+                        logger.info("Scheduling offline recognizer creation on main thread")
+                        self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+                        logger.info("Offline recognizer creation completed")
+                    logger.info("Starting transcribe_file for: %s", file_path)
+                    segments = self._asr.transcribe_file(file_path, on_progress=on_progress)
 
-                # Now transcribe the file (safe on background thread)
-                logger.info("Starting transcribe_file for: %s", file_path)
-                segments = self._asr.transcribe_file(file_path, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
                 full_text = self._apply_punctuation(full_text)
                 logger.info("transcribe_file completed, emitting event")
@@ -572,23 +603,36 @@ class SherpaNoteAPI(Bridge):
             logger.warning("retranscribe_record: audio file not found: %s", audio_path)
             return {"success": False, "error": f"Audio file not found: {audio_path}"}
 
-        if self._asr is None:
+        use_whisper = self._config.asr.asr_backend == "whisper-cpp"
+        if use_whisper and self._get_whisper_asr() is None:
+            return {"success": False, "error": "whisper.cpp backend not configured. Please install binary and model."}
+        if not use_whisper and self._asr is None:
             self._asr = SherpaASR(self._make_asr_config())
 
         logger.info("retranscribe_record: starting transcription of %s", audio_path)
 
-        def on_progress(percent: int) -> None:
-            self._emit("transcribe_progress", {"percent": percent})
+        def on_progress(percent: int, info: dict | None = None) -> None:
+            payload: dict = {"percent": percent}
+            if info:
+                payload["segments"] = info
+            self._emit("transcribe_progress", payload)
 
         def _work() -> None:
             try:
-                logger.info("retranscribe_record: creating offline recognizer...")
-                # Ensure offline recognizer is created on main thread
-                if self._asr._offline_recognizer is None:
-                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
-
-                logger.info("retranscribe_record: transcribing file %s", audio_path)
-                segments = self._asr.transcribe_file(audio_path, on_progress=on_progress)
+                if use_whisper:
+                    whisper = self._get_whisper_asr()
+                    if whisper is None:
+                        raise RuntimeError("whisper.cpp ASR not available")
+                    logger.info("retranscribe_record: transcribing with whisper.cpp: %s", audio_path)
+                    segments = whisper.transcribe_file(audio_path, on_progress=on_progress)
+                else:
+                    if self._asr is None:
+                        raise RuntimeError("sherpa-onnx ASR not initialized")
+                    logger.info("retranscribe_record: creating offline recognizer...")
+                    if self._asr._offline_recognizer is None:
+                        self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+                    logger.info("retranscribe_record: transcribing file %s", audio_path)
+                    segments = self._asr.transcribe_file(audio_path, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
                 full_text = self._apply_punctuation(full_text)
                 logger.info("retranscribe_record: transcription done, %d segments, saving...", len(segments))
@@ -774,19 +818,33 @@ class SherpaNoteAPI(Bridge):
 
         title = src.stem
 
-        if self._asr is None:
+        use_whisper = self._config.asr.asr_backend == "whisper-cpp"
+        if use_whisper and self._get_whisper_asr() is None:
+            return {"success": False, "error": "whisper.cpp backend not configured. Please install binary and model."}
+        if not use_whisper and self._asr is None:
             self._asr = SherpaASR(self._make_asr_config())
 
-        def on_progress(percent: int) -> None:
-            self._emit("transcribe_progress", {"percent": percent})
+        def on_progress(percent: int, info: dict | None = None) -> None:
+            payload: dict = {"percent": percent}
+            if info:
+                payload["segments"] = info
+            self._emit("transcribe_progress", payload)
 
         def _work(dest: str, rec_title: str) -> None:
             try:
-                if self._asr._offline_recognizer is None:
-                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
-
-                logger.info("import_and_transcribe: transcribing %s", dest)
-                segments = self._asr.transcribe_file(dest, on_progress=on_progress)
+                if use_whisper:
+                    whisper = self._get_whisper_asr()
+                    if whisper is None:
+                        raise RuntimeError("whisper.cpp ASR not available")
+                    logger.info("import_and_transcribe: transcribing with whisper.cpp: %s", dest)
+                    segments = whisper.transcribe_file(dest, on_progress=on_progress)
+                else:
+                    if self._asr is None:
+                        raise RuntimeError("sherpa-onnx ASR not initialized")
+                    if self._asr._offline_recognizer is None:
+                        self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+                    logger.info("import_and_transcribe: transcribing %s", dest)
+                    segments = self._asr.transcribe_file(dest, on_progress=on_progress)
                 full_text = " ".join(s["text"] for s in segments)
                 full_text = self._apply_punctuation(full_text)
                 logger.info("import_and_transcribe: saving record")
@@ -914,6 +972,93 @@ class SherpaNoteAPI(Bridge):
         if entry is None:
             return {"success": False, "error": f"Model not found: {model_id}"}
         return {"success": True, "data": list(entry.manual_download_links)}
+
+    # ------------------------------------------------------------------ #
+    #  whisper.cpp binary management                                       #
+    # ------------------------------------------------------------------ #
+
+    @expose
+    def get_whisper_binary_status(self) -> dict:
+        """Check whisper.cpp binary installation status."""
+        from py.whispercpp_registry import get_status
+
+        data_dir = self._config.data_dir or str(Path(__file__).parent / "data")
+        status = get_status(data_dir)
+        return {"success": True, "data": status}
+
+    @expose
+    def install_whisper_binary(self, variant: str | None = None) -> dict:
+        """Download and install whisper.cpp binary for the current platform."""
+        from py.whispercpp_registry import install_binary
+
+        data_dir = self._config.data_dir or str(Path(__file__).parent / "data")
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            if total > 0:
+                pct = int(100 * downloaded / total)
+                self._emit("model_download_progress", {
+                    "model_id": "whisper-cpp-binary",
+                    "phase": "download",
+                    "percent": pct,
+                    "downloaded_mb": round(downloaded / (1024 * 1024), 1),
+                    "total_mb": round(total / (1024 * 1024), 1),
+                })
+
+        result = install_binary(
+            data_dir,
+            variant=variant,
+            on_progress=_on_progress,
+            proxy_mode=self._config.asr.proxy_mode,
+            proxy_url=self._config.asr.proxy_url,
+        )
+        return result
+
+    @expose
+    def uninstall_whisper_binary(self) -> dict:
+        """Remove the installed whisper.cpp binary."""
+        from py.whispercpp_registry import uninstall_binary
+
+        data_dir = self._config.data_dir or str(Path(__file__).parent / "data")
+        removed = uninstall_binary(data_dir)
+        return {"success": True, "data": {"removed": removed}}
+
+    def _get_whisper_asr(self) -> "WhisperCppASR | None":
+        """Lazily initialize and return the WhisperCppASR instance."""
+        if self._whisper_asr is None:
+            from py.whispercpp import WhisperCppASR, WhisperCppConfig
+            from py.whispercpp_registry import get_binary_path
+
+            data_dir = self._config.data_dir or str(Path(__file__).parent / "data")
+            binary_path = get_binary_path(data_dir)
+
+            # Use the active whisper.cpp model.
+            model_dir = Path(self._config.asr.model_dir or _DEFAULT_MODELS_DIR)
+            model_id = self._config.asr.active_offline_model
+            model_path = ""
+            if model_id and model_id.startswith("whisper-ggml-"):
+                model_path = str(model_dir / model_id / f"ggml-{model_id.replace('whisper-ggml-', '')}.bin")
+
+            if not model_path or not Path(model_path).exists():
+                # Try to find any installed whisper.cpp model.
+                for child in model_dir.iterdir():
+                    if child.is_dir() and child.name.startswith("whisper-ggml-"):
+                        bin_file = next(child.glob("ggml-*.bin"), None)
+                        if bin_file:
+                            model_path = str(bin_file)
+                            break
+
+            if not model_path:
+                return None
+
+            config = WhisperCppConfig(
+                binary_path=str(binary_path),
+                model_path=model_path,
+                language=self._config.asr.language,
+                threads=4,
+            )
+            self._whisper_asr = WhisperCppASR(config)
+
+        return self._whisper_asr
 
     @expose
     def pick_directory(self) -> dict:

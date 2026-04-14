@@ -290,9 +290,10 @@ def extract_archive(
     models_dir: Path,
     is_vad: bool = False,
 ) -> Path:
-    """Extract a .tar.bz2 archive (or copy a single .onnx file) into models_dir.
+    """Extract a .tar.bz2 archive (or copy a single file) into models_dir.
 
     For VAD models, the .onnx file is placed directly in models_dir.
+    For whisper.cpp models (.bin), the file is copied to {models_dir}/{model_id}/.
     For other models, the archive is extracted to {models_dir}/{model_id}/.
 
     Returns:
@@ -306,6 +307,24 @@ def extract_archive(
         shutil.copy2(archive_path, dest)
         logger.info("VAD model installed to %s", dest)
         return dest
+
+    # whisper.cpp GGML models are single .bin files -- copy directly,
+    # regardless of the temporary download filename extension.
+    from py.model_registry import get_model as _get_model_entry
+    _entry = _get_model_entry(model_id)
+    is_whispercpp = _entry is not None and _entry.model_type == "whispercpp"
+    suffix = archive_path.suffix.lower()
+    if is_whispercpp or suffix == ".bin":
+        target_dir = models_dir / model_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        # Use the original archive_name when the temp file has a generic .tmp extension.
+        dest_name = archive_path.name
+        if suffix == ".tmp" and _entry and _entry.archive_name:
+            dest_name = _entry.archive_name
+        dest = target_dir / dest_name
+        shutil.copy2(archive_path, dest)
+        logger.info("GGML model installed to %s", dest)
+        return target_dir
 
     target_dir = models_dir / model_id
     if target_dir.exists():
@@ -672,7 +691,9 @@ class ModelInstaller:
             }
 
         # Auto-download VAD if this is the first ASR model install.
-        if not is_vad:
+        # Skip for whisper.cpp models (they don't use sherpa-onnx VAD).
+        is_whispercpp = entry.model_type == "whispercpp"
+        if not is_vad and not is_whispercpp:
             vad_id = "silero_vad_v5"
             vad_path = models_dir / (vad_id + ".onnx")
             if not vad_path.exists():
@@ -772,7 +793,9 @@ class ModelInstaller:
                 }
 
             # 5. Auto-download VAD if this is the first ASR model install.
-            if not is_vad:
+            # Skip VAD for whisper.cpp models (they don't use sherpa-onnx VAD).
+            is_whispercpp = entry.model_type == "whispercpp"
+            if not is_vad and not is_whispercpp:
                 vad_id = "silero_vad_v5"
                 vad_path = models_dir / (vad_id + ".onnx")
                 if not vad_path.exists():

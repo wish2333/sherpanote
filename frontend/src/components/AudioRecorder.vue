@@ -11,11 +11,15 @@ import { useRecording } from "../composables/useRecording";
 import { useTranscript } from "../composables/useTranscript";
 import { call } from "../bridge";
 import { useAppStore } from "../stores/appStore";
+import { computed } from "vue";
 
 const emit = defineEmits<{
   recordingComplete: [data: { text: string; segments: { text: string; timestamp: number[] }[]; duration: number; audio_path: string | null }];
   fileSelected: [filePath: string];
 }>();
+
+const store = useAppStore();
+const isWhisperCpp = computed(() => store.asrConfig.asr_backend === "whisper-cpp");
 
 const {
   isRecording,
@@ -31,6 +35,7 @@ const {
 const {
   isTranscribingFile,
   transcribeProgress,
+  segmentInfo,
 } = useTranscript();
 
 async function toggleRecording() {
@@ -94,7 +99,7 @@ async function pickAudioFile() {
     <div v-if="isTranscribingFile" class="rounded-lg border border-base-300 bg-base-200 p-4">
       <div class="mb-2 flex items-center justify-between text-sm">
         <span>转写文件中...</span>
-        <span>{{ transcribeProgress }}%</span>
+        <span>{{ transcribeProgress }}%{{ segmentInfo ? ` (${segmentInfo.current}/${segmentInfo.total})` : '' }}</span>
       </div>
       <progress class="progress progress-primary w-full" :value="transcribeProgress" max="100"></progress>
     </div>
@@ -104,7 +109,8 @@ async function pickAudioFile() {
       <button
         v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
         class="btn btn-primary"
-        :disabled="!isSupported"
+        :disabled="!isSupported || isWhisperCpp"
+        :title="isWhisperCpp ? 'whisper.cpp 不支持实时录音，请使用文件导入' : ''"
         @click="toggleRecording"
       >
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">

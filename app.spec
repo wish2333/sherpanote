@@ -74,6 +74,7 @@ hiddenimports = [
     "py.io",
     "py.model_manager",
     "py.model_registry",
+    "py.gpu_detect",
 ]
 
 

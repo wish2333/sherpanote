@@ -30,6 +30,7 @@ class AsrConfig:
     language: str = "auto"
     sample_rate: int = 16000
     use_gpu: bool = False
+    asr_backend: str = "sherpa-onnx"  # "sherpa-onnx" | "whisper-cpp"
     active_streaming_model: str = ""
     active_offline_model: str = ""
     auto_punctuate: bool = False
@@ -87,6 +88,7 @@ class AppConfig:
                 "language": self.asr.language,
                 "sample_rate": self.asr.sample_rate,
                 "use_gpu": self.asr.use_gpu,
+                "asr_backend": self.asr.asr_backend,
                 "active_streaming_model": self.asr.active_streaming_model,
                 "active_offline_model": self.asr.active_offline_model,
                 "auto_punctuate": self.asr.auto_punctuate,
@@ -138,6 +140,7 @@ class AppConfig:
                 language=asr_d.get("language", "auto"),
                 sample_rate=asr_d.get("sample_rate", 16000),
                 use_gpu=asr_d.get("use_gpu", False),
+                asr_backend=asr_d.get("asr_backend", "sherpa-onnx"),
                 active_streaming_model=asr_d.get("active_streaming_model", ""),
                 active_offline_model=asr_d.get("active_offline_model", ""),
                 auto_punctuate=asr_d.get("auto_punctuate", False),

@@ -64,6 +64,7 @@ export interface AsrConfig {
   language: string;
   sample_rate: number;
   use_gpu: boolean;
+  asr_backend: string;
   active_streaming_model: string;
   active_offline_model: string;
   auto_punctuate: boolean;
@@ -138,4 +139,22 @@ export interface DownloadProgress {
   downloaded_mb: number;
   total_mb: number;
   error?: string;
+}
+
+/** GPU detection result from the backend. */
+export interface GpuStatus {
+  available: boolean;
+  gpu_name: string;
+  cuda_version: string;
+  reason: string;
+  onnx_provider: string;
+}
+
+/** whisper.cpp binary installation status. */
+export interface WhisperBinaryStatus {
+  installed: boolean;
+  version: string | null;
+  platform: string;
+  available_variants: string[];
+  default_variant: string | null;
 }

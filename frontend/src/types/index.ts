@@ -23,11 +23,12 @@ export interface AiResults {
   brainstorm?: string;
 }
 
-/** A complete transcription record (immutable — create new objects to update). */
+/** A complete transcription record (immutable -- create new objects to update). */
 export interface TranscriptRecord {
   id: string;
   title: string;
   audio_path: string | null;
+  can_retranscribe?: boolean;
   transcript: string;
   segments: Segment[];
   ai_results: AiResults;
@@ -36,7 +37,7 @@ export interface TranscriptRecord {
   duration_seconds: number;
   created_at: string;
   updated_at: string;
-  version: number;
+  version?: number;
 }
 
 /** A version snapshot for history tracking. */
@@ -51,7 +52,7 @@ export interface Version {
 
 /** AI model configuration. */
 export interface AiConfig {
-  provider: "openai" | "anthropic" | "ollama" | "qwen";
+  provider: string;
   model: string;
   api_key: string | null;
   base_url: string | null;
@@ -59,12 +60,40 @@ export interface AiConfig {
   max_tokens: number;
 }
 
+/** AI provider preset. */
+export interface AiPreset {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  api_key: string | null;
+  base_url: string | null;
+  temperature: number;
+  max_tokens: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** AI processing preset. */
+export interface AiProcessingPreset {
+  id: string;
+  name: string;
+  mode: string;
+  prompt: string;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 /** ASR engine configuration. */
 export interface AsrConfig {
   model_dir: string;
-  language: "zh" | "en" | "auto";
+  language: string;
   sample_rate: number;
   use_gpu: boolean;
+  asr_backend: string;
   active_streaming_model: string;
   active_offline_model: string;
   auto_punctuate: boolean;
@@ -81,42 +110,75 @@ export interface AsrConfig {
   active_vad_model: string;
 }
 
-/** AI processing modes. */
-export type AiMode = "polish" | "note" | "mindmap" | "brainstorm";
+/** App settings bundle. */
+export interface AppSettings {
+  ai: AiConfig;
+  asr: AsrConfig;
+  auto_ai_modes: string[];
+  max_tokens_mode: string;
+}
 
-/** Export file formats. */
-export type ExportFormat = "md" | "txt" | "docx" | "srt";
+/** AI processing modes. */
+export type AiMode = "polish" | "note" | "mindmap" | "brainstorm" | `preset_${string}`;
+
+export type ExportFormat = "txt" | "md" | "srt" | "docx";
 
 /** List filter options. */
 export interface RecordFilter {
-  category?: string;
   keyword?: string;
-  sort_by?: "created_at" | "updated_at" | "title";
-  sort_order?: "asc" | "desc";
+  category?: string;
+  sort_by?: string;
+  sort_order?: string;
 }
 
 /** Model entry from the registry catalog. */
 export interface ModelEntry {
   model_id: string;
   display_name: string;
-  model_type: "streaming" | "offline" | "vad";
+  model_type: string;
   languages: string[];
   size_mb: number;
   description: string;
+  sources: string[];
+  manual_download_links: Array<{ label: string; url: string }>;
 }
 
 /** An installed model on disk. */
 export interface InstalledModel {
   model_id: string;
+  model_type: string;
+  display_name: string;
+  path: string;
+  validated: boolean;
   valid: boolean;
+  missing_files: string[];
   size_mb: number;
 }
 
 /** Download progress event payload. */
 export interface DownloadProgress {
   model_id: string;
-  phase: "download" | "extract" | "validate";
+  status: string;
   percent: number;
-  bytes_downloaded?: number;
-  total_bytes?: number;
+  downloaded_mb: number;
+  total_mb: number;
+  error?: string;
+}
+
+/** GPU detection result from the backend. */
+export interface GpuStatus {
+  available: boolean;
+  gpu_name: string;
+  cuda_version: string;
+  reason: string;
+  onnx_provider: string;
+}
+
+/** whisper.cpp binary installation status. */
+export interface WhisperBinaryStatus {
+  installed: boolean;
+  version: string | null;
+  platform: string;
+  available_variants: string[];
+  default_variant: string | null;
 }

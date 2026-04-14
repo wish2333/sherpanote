@@ -12,6 +12,10 @@ import { useAppStore } from "../stores/appStore";
 import {
   call,
   onEvent,
+  detectGpu,
+  getWhisperBinaryStatus,
+  installWhisperBinary,
+  uninstallWhisperBinary,
   listAvailableModels,
   listInstalledModels,
   installModel,
@@ -19,7 +23,7 @@ import {
   cancelModelInstall,
   pickDirectory,
 } from "../bridge";
-import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress } from "../types";
+import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus } from "../types";
 
 const store = useAppStore();
 const router = useRouter();
@@ -32,6 +36,9 @@ const maxVersions = ref(20);
 const isSaving = ref(false);
 const isTesting = ref(false);
 const testResult = ref<{ success: boolean; message: string } | null>(null);
+const gpuStatus = ref<GpuStatus | null>(null);
+const whisperStatus = ref<WhisperBinaryStatus | null>(null);
+const isInstallingWhisper = ref(false);
 const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management">("general");
 
 const providers = [
@@ -409,6 +416,34 @@ async function handlePickDirectory() {
   }
 }
 
+// ---- whisper.cpp binary management ----
+
+async function handleInstallWhisper() {
+  isInstallingWhisper.value = true;
+  try {
+    const res = await installWhisperBinary();
+    if (res.success) {
+      store.showToast("whisper.cpp installed successfully", "success");
+      const statusRes = await getWhisperBinaryStatus();
+      if (statusRes.success && statusRes.data) {
+        whisperStatus.value = statusRes.data;
+      }
+    } else {
+      store.showToast(res.error ?? "Failed to install whisper.cpp", "error");
+    }
+  } finally {
+    isInstallingWhisper.value = false;
+  }
+}
+
+async function handleUninstallWhisper() {
+  const res = await uninstallWhisperBinary();
+  if (res.success) {
+    store.showToast("whisper.cpp uninstalled", "success");
+    whisperStatus.value = { installed: false, version: null, platform: "", available_variants: [], default_variant: null };
+  }
+}
+
 // ---- Config ----
 
 async function loadConfig() {
@@ -559,6 +594,16 @@ onMounted(async () => {
   await loadModels();
   await loadPresets();
   await loadProcessingPresets();
+  // Detect GPU status
+  const gpuRes = await detectGpu();
+  if (gpuRes.success && gpuRes.data) {
+    gpuStatus.value = gpuRes.data;
+  }
+  // Check whisper.cpp status
+  const whisperRes = await getWhisperBinaryStatus();
+  if (whisperRes.success && whisperRes.data) {
+    whisperStatus.value = whisperRes.data;
+  }
 });
 
 onUnmounted(() => {
@@ -1384,19 +1429,86 @@ onUnmounted(() => {
               </label>
             </div>
 
+            <!-- ASR Backend Selector -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">ASR 引擎</span>
+              </label>
+              <select
+                v-model="asrConfig.asr_backend"
+                class="select select-bordered w-full"
+                @change="saveConfig"
+              >
+                <option value="sherpa-onnx">sherpa-onnx (内置)</option>
+                <option value="whisper-cpp">whisper.cpp (插件)</option>
+              </select>
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  选择语音识别引擎。whisper.cpp 作为可选插件，需要额外下载二进制和模型。
+                </span>
+              </label>
+            </div>
+
+            <!-- whisper.cpp settings (shown only when whisper-cpp selected) -->
+            <div v-if="asrConfig.asr_backend === 'whisper-cpp'" class="space-y-3 rounded-lg border border-base-300 bg-base-200 p-4">
+              <h4 class="font-medium text-sm">whisper.cpp 设置</h4>
+
+              <!-- Binary status -->
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-sm">
+                    二进制状态:
+                    <span v-if="whisperStatus?.installed" class="text-success">已安装 (v{{ whisperStatus.version }})</span>
+                    <span v-else class="text-error">未安装</span>
+                  </span>
+                </div>
+                <div class="flex gap-2">
+                  <button
+                    v-if="!whisperStatus?.installed"
+                    class="btn btn-primary btn-xs"
+                    :disabled="isInstallingWhisper"
+                    @click="handleInstallWhisper"
+                  >
+                    {{ isInstallingWhisper ? '安装中...' : '安装' }}
+                  </button>
+                  <button
+                    v-else
+                    class="btn btn-error btn-xs"
+                    @click="handleUninstallWhisper"
+                  >
+                    卸载
+                  </button>
+                </div>
+              </div>
+
+              <p class="text-xs text-base-content/40">
+                whisper.cpp 不支持实时录音。选择此引擎后，请使用文件导入功能进行转写。
+                模型请在"模型管理"页面下载 whisper.cpp (GGML) 类型的模型。
+              </p>
+            </div>
+
             <!-- GPU Toggle -->
             <div class="form-control">
               <label class="label cursor-pointer justify-start gap-4">
-                <span class="label-text font-medium">启用 GPU</span>
+                <span class="label-text font-medium">启用 GPU 加速</span>
                 <input
                   v-model="asrConfig.use_gpu"
                   type="checkbox"
                   class="toggle toggle-primary"
+                  :disabled="!gpuStatus?.available"
                 />
               </label>
               <label class="label">
                 <span class="label-text-alt text-base-content/40">
-                  启用 GPU 加速（需要 CUDA/OpenCL 支持）。
+                  <template v-if="gpuStatus?.available">
+                    {{ gpuStatus.gpu_name }} (CUDA {{ gpuStatus.cuda_version }})
+                  </template>
+                  <template v-else-if="gpuStatus">
+                    {{ gpuStatus.reason }}
+                  </template>
+                  <template v-else>
+                    正在检测 GPU 状态...
+                  </template>
                 </span>
               </label>
             </div>

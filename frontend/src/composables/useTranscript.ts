@@ -20,6 +20,7 @@ export function useTranscript() {
   const partialText = ref("");
   const finalSegments = ref<TranscriptSegment[]>([]);
   const transcribeProgress = ref(0);
+  const segmentInfo = ref<{ current: number; total: number } | null>(null);
   const isTranscribingFile = ref(false);
 
   // Cleanup handles for event listeners.
@@ -56,6 +57,7 @@ export function useTranscript() {
     partialText.value = "";
     finalSegments.value = [];
     transcribeProgress.value = 0;
+    segmentInfo.value = null;
   }
 
   /** Transcribe an audio file via backend.
@@ -69,11 +71,18 @@ export function useTranscript() {
   ): Promise<{ segments: TranscriptSegment[]; text: string; audio_path: string } | null> {
     isTranscribingFile.value = true;
     transcribeProgress.value = 0;
+    segmentInfo.value = null;
 
-    const offProgress = onEvent<{ percent: number }>(
+    const offProgress = onEvent<{
+      percent: number;
+      segments?: { current: number; total: number };
+    }>(
       "transcribe_progress",
-      ({ percent }) => {
+      ({ percent, segments }) => {
         transcribeProgress.value = percent;
+        if (segments) {
+          segmentInfo.value = segments;
+        }
       },
     );
     cleanupFns.push(offProgress);
@@ -146,6 +155,7 @@ export function useTranscript() {
     partialText,
     finalSegments,
     transcribeProgress,
+    segmentInfo,
     isTranscribingFile,
     startListening,
     stopListening,

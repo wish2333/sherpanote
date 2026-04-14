@@ -443,6 +443,8 @@ configuration:
     parser.add_argument("--with-models", type=str, default=None,
                         metavar="MODEL_IDS",
                         help="Comma-separated model IDs to bundle (onedir only)")
+    parser.add_argument("--cuda", action="store_true",
+                        help="Build with CUDA GPU support (NVIDIA only, Windows)")
     args = parser.parse_args()
 
     if args.clean:
@@ -467,7 +469,7 @@ configuration:
         model_ids = [m.strip() for m in args.with_models.split(",")]
         bundled_model_dirs = _download_build_models(model_ids)
 
-    _build_desktop(onefile=args.onefile, bundled_model_dirs=bundled_model_dirs)
+    _build_desktop(onefile=args.onefile, bundled_model_dirs=bundled_model_dirs, cuda=args.cuda)
 
 
 # ========== frontend build ==========
@@ -502,7 +504,13 @@ def _build_frontend() -> None:
 def _build_desktop(
     onefile: bool = False,
     bundled_model_dirs: list[tuple[str, str]] | None = None,
+    cuda: bool = False,
 ) -> None:
+    if cuda:
+        _info("=== CUDA GPU build (NVIDIA) ===")
+        _info("Note: This build requires the sherpa-onnx +cuda wheel variant.")
+        _info("      The resulting app will be larger (~200MB+ vs ~50MB CPU-only).")
+        _info("      Users must have an NVIDIA GPU with CUDA Toolkit installed.")
     if onefile:
         _build_onefile()
     else:

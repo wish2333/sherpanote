@@ -62,6 +62,7 @@ export const useAppStore = defineStore("app", () => {
     language: "auto",
     sample_rate: 16000,
     use_gpu: false,
+    asr_backend: "sherpa-onnx",
     active_streaming_model: "",
     active_offline_model: "",
     auto_punctuate: false,
