@@ -412,7 +412,7 @@ feat(core): Implement v1.3.0 with GPU support, whisper.cpp integration, and prog
 
 - 录音/转录界面提供引擎切换和选Whisper引擎是的模型选项
 
-- Whisper模型输出格式需要与我们当前的适配（识别时间戳并按照软件当前的格式把时间戳及其对应内容显示出来）
+- Whisper模型输出格式需要与我们当前的适配（识别时间戳并按照软件当前的格式把时间戳及其对应内容显示出来，去掉时间戳的文字部分显示在下方文字框中）
 
   - 22:30:08 [WARNING] py.whispercpp: Failed to parse whisper.cpp JSON output. Raw output:
 
@@ -420,3 +420,415 @@ feat(core): Implement v1.3.0 with GPU support, whisper.cpp integration, and prog
     [00:00:05.260 --> 00:00:08.640]  对对对
 
 - 添加视频下载转录功能（yt-dlp，优先适配bilibili）
+
+###  dev-1.3.0-pre2 Implementation Plan
+
+ Context
+
+ v1.3.0 引入了 whisper.cpp 作为可选 ASR 后端，但存在几个问题：
+ 1. 下载源切换后不会自动保存
+ 2. MS 源的两个 Qwen3 模型需要从模型管理界面移除
+ 3. 选择 Whisper 引擎时没有独立的模型选择器，和 ONNX 模型混在一起
+ 4. 录音界面没有引擎切换功能
+ 5. whisper.cpp 输出 SRT 而非 JSON，时间戳解析失败
+ 6. 缺少视频链接下载转写功能
+
+---
+ Task 1: 下载源自动保存配置
+
+ Complexity: Low
+ Files: frontend/src/views/SettingsView.vue
+
+ 修改:
+ - 在模型管理页面的下载源 <select> (line 1566) 添加 @change="saveConfig" 事件
+ - 目前只有 ghproxy 域名输入框有保存逻辑，下载源切换没有
+
+---
+ Task 2: 删除 MS 源的两个 Qwen3 模型
+
+ Complexity: Low
+ Files: py/model_registry.py
+
+ 修改:
+ - 移除两个 sources=("modelscope",) 的 Qwen3 模型条目 (lines 94-116):
+   - sherpa-onnx-qwen3-asr-0.6B (display_name: "Qwen3-ASR 0.6B (ModelScope)")
+   - sherpa-onnx-qwen3-asr-1.7B (display_name: "Qwen3-ASR 1.7B (ModelScope)")
+ - 保留其他源的 Qwen3 模型条目（GitHub/HF 等源的 int8 版本）
+
+---
+ Task 3: 模型设置界面 Whisper 引擎模型切换
+
+ Complexity: Medium
+ Files: frontend/src/views/SettingsView.vue, py/config.py, main.py
+
+ 问题: 当前 active_offline_model 同时用于 ONNX 和 Whisper 模型，但两者不可混用。需要在选择 Whisper 引擎时显示专门的
+ GGML 模型选择器。
+
+ 修改:
+
+ 前端 SettingsView.vue
+
+ - 在 "ASR 引擎配置" 卡片中，当 asr_backend === 'whisper-cpp' 时:
+   - 隐藏现有的 "流式识别模型" 和 "离线识别模型" 选择器（Whisper 不支持流式）
+   - 在 whisper.cpp 设置区块内添加 "Whisper 模型" 选择器
+   - 模型列表从 installedModels 中过滤 model_type === "whispercpp" 的模型
+   - 选中的模型 ID 保存到 asrConfig.active_whisper_model
+   - 保存时调用 update_config 传递 active_whisper_model
+
+ 后端 config.py
+
+ - AsrConfig 添加 active_whisper_model: str = "" 字段
+ - to_dict / from_dict 序列化/反序列化新字段
+
+ 后端 main.py
+
+ - _get_whisper_asr (line 1025): 优先使用 active_whisper_model 而非 active_offline_model 查找模型路径
+ - 修改模型路径查找逻辑，匹配 active_whisper_model 对应的目录和 .bin 文件
+
+ 前端 types.ts
+
+ - AsrConfig 接口添加 active_whisper_model: string
+
+---
+ Task 4: 录音/转录界面引擎切换
+
+ Complexity: Medium
+ Files: frontend/src/views/RecordView.vue, frontend/src/stores/appStore.ts
+
+ 修改:
+
+ RecordView.vue Quick Settings Bar (line 258)
+
+ - 在语言选择器后添加 "ASR 引擎" 选择器 (sherpa-onnx / whisper-cpp)
+ - 当选择 whisper-cpp 时:
+   - 隐藏 "流式模型" 选择器（Whisper 不支持流式）
+   - 显示 "Whisper 模型" 选择器（从 installedModels 过滤 model_type === "whispercpp"）
+   - 绑定到 store.asrConfig.active_whisper_model
+ - 当选择 sherpa-onnx 时:
+   - 恢复现有的 "流式模型" 和 "离线模型" 选择器
+   - 隐藏 "Whisper 模型" 选择器
+ - 引擎切换时调用 saveQuickSetting 保存配置
+
+ 导入转写区域
+
+ - 在文件上传按钮旁添加 URL 输入入口（Task 6 的一部分，此处预留位置）
+
+---
+ Task 5: Whisper 输出格式适配
+
+ Complexity: Medium
+ Files: py/whispercpp.py
+
+ 问题: whisper.cpp v1.8.4 的 --output-json 标志不生效，实际输出 SRT 格式，导致 JSON 解析失败。
+
+ 修改:
+
+ 修复 CLI 参数
+
+ - 将 --output-json 改为 --output-file-type json（whisper.cpp v1.8.4 正确参数）
+ - 同时保留 --output-file 参数指定输出文件路径，使用临时文件
+ - 从临时文件读取 JSON 输出而非 stdout
+
+ 添加 SRT fallback 解析
+
+ - 在 _parse_output 方法中，当 JSON 解析失败时，检测输出是否为 SRT 格式
+ - SRT 格式: [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
+ - 解析时间戳转换为秒数: HH*3600 + MM*60 + SS.mmm
+ - 提取文本内容（去掉时间戳标签），与现有 Segment 格式对齐
+
+ 输出格式
+
+ 每个 segment 产出:
+ {
+     "index": int,
+     "text": str,           # 纯文本，不含时间戳标签
+     "start_time": float,   # 秒
+     "end_time": float,     # 秒
+     "speaker": None,
+     "is_final": True,
+ }
+ 这与 TranscriptPanel.vue 和 EditorView.vue 现有的 start_time/end_time 显示逻辑完全兼容。
+
+---
+ Task 6: 视频下载转录功能 (yt-dlp)
+
+ Complexity: High
+ Files:
+ - py/requirements.txt 或 pyproject.toml - 添加 yt-dlp 依赖
+ - py/video_downloader.py (新建) - yt-dlp 封装模块
+ - main.py - 添加 download_and_transcribe API
+ - frontend/src/views/RecordView.vue - 导入区域添加 URL 输入
+ - frontend/src/bridge.ts - 添加 bridge helper
+ - frontend/src/components/TranscriptPanel.vue - 进度展示（如需）
+
+ 设计:
+
+ 后端 video_downloader.py
+
+ @dataclass(frozen=True)
+ class VideoDownloadConfig:
+     output_dir: str          # 音频目录
+     format: str = "bestaudio"  # 优先下载最佳音频
+     proxy: str = ""          # 代理设置（复用现有 AsrConfig.proxy）
+
+ def download_audio(url: str, config: VideoDownloadConfig,
+                    on_progress: Callable) -> str:
+     """下载视频的音频轨道，返回本地文件路径。"""
+ - 使用 yt_dlp.YoutubeDL 下载
+ - 设置 postprocessors 提取音频为 wav/mp3 格式
+ - 优先适配 bilibili（无需特殊处理，yt-dlp 原生支持）
+ - 通过 on_progress 回调报告下载进度
+ - 下载完成后返回文件路径，由调用方纳入音频管理器
+
+ 后端 main.py
+
+ - 新增 @expose download_and_transcribe(self, url: str) -> dict 方法
+ - 流程: 下载音频 -> _copy_file_to_audio_dir 纳入管理 -> 转录 -> 保存记录
+ - 复用现有的 import_and_transcribe 的后半段逻辑
+ - 事件: download_progress (下载进度), transcribe_progress (转录进度), download_transcribe_complete (完成)
+
+ 前端 RecordView.vue
+
+ - 在导入转写区域（line 325 附近）添加 URL 输入框和 "下载转写" 按钮
+ - 输入视频链接 -> 点击按钮 -> 显示下载+转录进度 -> 完成后跳转到编辑器
+ - URL 输入框 placeholder 提示支持的平台（bilibili, YouTube 等）
+ - 下载过程中禁用按钮，显示进度条
+
+---
+ 文件修改总览
+
+ ┌─────────────────────────────────────┬──────┬──────────┐
+ │                文件                 │ Task │ 修改类型 │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ frontend/src/views/SettingsView.vue │ 1, 3 │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ py/model_registry.py                │ 2    │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ py/config.py                        │ 3    │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ main.py                             │ 3, 6 │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ frontend/src/types.ts               │ 3    │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ frontend/src/views/RecordView.vue   │ 4, 6 │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ py/whispercpp.py                    │ 5    │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ py/video_downloader.py              │ 6    │ New      │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ py/requirements.txt                 │ 6    │ Edit     │
+ ├─────────────────────────────────────┼──────┼──────────┤
+ │ frontend/src/bridge.ts              │ 6    │ Edit     │
+ └─────────────────────────────────────┴──────┴──────────┘
+
+---
+ 验证方案
+
+ 1. 下载源保存: 切换下载源后刷新页面，确认配置保持
+ 2. 模型管理: 确认 MS 源 Qwen3 模型不再显示，其他源 Qwen3 不受影响
+ 3. Whisper 模型切换: 选择 whisper-cpp 引擎后模型选择器显示 GGML 模型，切换回 onnx 后恢复原样
+ 4. 录音界面引擎切换: Quick Settings 中切换引擎，模型列表随之变化
+ 5. Whisper 转录: 使用 whisper.cpp 转录音频文件，确认时间戳正确显示在 TranscriptPanel 中
+ 6. 视频下载: 输入 bilibili 链接，确认下载进度显示、音频提取成功、自动转录、记录保存
+
+### 任务总结
+
+  Task 1: 下载源自动保存配置
+
+  - 文件: frontend/src/views/SettingsView.vue
+  - 修改: 下载源 <select> 添加 @change="saveConfig"，切换即保存
+
+  Task 2: 删除 MS 源两个 Qwen3 模型
+
+  - 文件: py/model_registry.py
+  - 修改: 移除 sherpa-onnx-qwen3-asr-0.6B 和 sherpa-onnx-qwen3-asr-1.7B 两个 ModelScope 专属条目，其他源的 Qwen3 int8
+    版本保留
+
+  Task 3: 模型设置界面 Whisper 模型切换
+
+  - 文件: py/config.py, frontend/src/types.ts, frontend/src/views/SettingsView.vue, main.py
+  - 修改:
+    - AsrConfig 新增 active_whisper_model 字段（含序列化/反序列化）
+    - 前端 AsrConfig 类型同步添加字段
+    - SettingsView 选择 whisper-cpp 时隐藏流式/离线模型选择器，显示 GGML 模型选择器
+    - main.py _get_whisper_asr 优先使用 active_whisper_model
+
+  Task 4: 录音界面引擎切换
+
+  - 文件: frontend/src/views/RecordView.vue
+  - 修改: Quick Settings 栏新增引擎选择器，根据引擎动态显示对应的模型选择器
+
+  Task 5: Whisper 输出格式适配
+
+- 文件: py/whispercpp.py
+
+- 修改:
+    - CLI 参数从 --output-json 改为 --output-file + --output-file-type json，输出到临时文件
+    - 新增 SRT 格式 fallback 解析 (_parse_srt)，正则匹配 [HH:MM:SS.mmm --> HH:MM:SS.mmm] 时间戳并转换为秒数
+    - 解析优先级: JSON 文件 -> JSON stdout -> SRT -> 原始文本
+
+- 问题：
+
+  - > 23:22:26 [INFO] py.whispercpp: Running whisper.cpp: Q:\Git\GiteaManager\sherpanote\data\whisper.cpp\whisper-cli.exe
+    > -m Q:\Git\GiteaManager\sherpanote\models\whisper-ggml-tiny\ggml-tiny.bin -f
+    > Q:\Git\GiteaManager\sherpanote\data\audio\import_20260408_104031.wav --output-file
+    > C:\Users\10411\AppData\Local\Temp\whisper_out_2tpbrg9y.json --output-file-type json -l zh -t 4
+    > 23:22:27 [INFO] py.whispercpp: whisper.cpp produced 0 segments
+    > 23:22:27 [INFO] __main__: retranscribe_record: transcription done, 0 segments, saving...
+    > 23:22:27 [INFO] __main__: retranscribe_record: complete for record
+    > 0469f454-19f2-4713-ba92-83dafdc4a02d修改之后同一个文件whisper也识别错误了，其他文件也会报错，需要解决
+
+- 代码已修复。现在不再使用临时文件，whisper.cpp 输出直接从 stdout 读取并用 SRT 解析器处理。
+
+  Task 6 (待实现): 视频下载转录
+
+  - 详细计划保存在 C:\Users\10411\.claude\plans\peppy-knitting-bumblebee.md
+  - 核心要点: 新建 py/video_downloader.py 封装 yt-dlp、main.py 新增 download_and_transcribe API、pyproject.toml 添加
+    yt-dlp 依赖、前端 RecordView 导入区域添加 URL 输入框
+
+     Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+    
+     Column Key
+       Read: Tokens to read this observation (cost to learn it now)
+       Work: Tokens spent on work that produced this record ( research, building, deciding)
+    
+     Context Index: This semantic index (titles, types, files, tokens) is usually sufficient to understand past work.
+    
+     When you need implementation details, rationale, or debugging context:
+       - Fetch by ID: get_observations([IDs]) for observations visible in this index
+       - Search history: Use the mem-search skill for past decisions, bugs, and deeper research
+       - Trust this index over re-reading code for past decisions and learnings
+    
+     Context Economics
+       Loading: 50 observations (12,560 tokens to read)
+       Work investment: 0 tokens spent on research, building, and decisions
+    
+     Apr 14, 2026
+    
+     General
+       #249  10:46 PM  🔵  Project structure mapped for Vue frontend and Python backend
+     ..\..\Git\GiteaManager\sherpanote\py\whispercpp_registry.py
+       #250  10:47 PM  🔵  Whisper.cpp binary registry manages platform-specific downloads and installation
+     ..\..\Git\GiteaManager\sherpanote\py\asr.py
+       #251  10:48 PM  🔵  ASR backend architecture supports dual engines: sherpa-onnx (built-in) and whisper.cpp
+     (plugin)
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\components\AudioRecorder.vue
+       #252            🔵  Frontend already has ASR backend detection and disables recording for whisper.cpp
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\EditorView.vue
+       #253  10:50 PM  🔵  Found formatAudioTime function in EditorView.vue for timestamp display formatting
+       #254  10:51 PM  🔵  Current timestamp format uses MM:SS display format with segment-based seeking
+     ..\..\Git\GiteaManager\sherpanote\py\model_registry.py
+       #255  10:52 PM  🔵  Comprehensive codebase exploration reveals two Qwen3 models on ModelScope source, download
+     source storage, and Whisper.cpp integration details
+       #256            🔵  Identified two ModelScope-exclusive Qwen3 models for removal and Whisper.cpp timestamp
+     parsing format variations
+     ..\..\Git\GiteaManager\sherpanote\py\whispercpp.py
+       #257  10:53 PM  🔵  Whisper.cpp subprocess command construction and error handling found in whispercpp.py
+     General
+       #259  10:58 PM  ✅  Download Source Auto-Save Configuration
+     ..\..\Git\GiteaManager\sherpanote\app\app.py
+       #260            🔵  Application Structure Identified
+     ..\..\Git\GiteaManager\sherpanote\py\model_registry.py
+       #261            🔵  Model Registry Structure Identified
+     ..\..\Git\GiteaManager\sherpanote\py\config.py
+       #262            🔵  Configuration System Identified
+     ..\..\Git\GiteaManager\sherpanote\main.py
+       #263            🔵  Main Application API Identified
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+       #264            🔵  Frontend Vue Components Identified
+     General
+       #265            🔵  Settings UI Structure Identified
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\RecordView.vue
+       #266  10:59 PM  🔵  Record Interface Structure Identified
+       #267            🔵  Recording Interface Implementation Identified
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\components\AudioRecorder.vue
+       #268            🔵  Audio Recorder Component Identified
+     ..\..\Git\GiteaManager\sherpanote\py\asr.py
+       #269            🔵  ASR Engine Implementation Identified
+     ..\..\Git\GiteaManager\sherpanote\py\whispercpp.py
+       #270            🔵  Whisper Integration Components Identified
+       #271            🔵  Whisper.cpp Implementation Identified
+     ..\..\Git\GiteaManager\sherpanote\py\whispercpp_registry.py
+       #272            🔵  Whisper Binary Registry Identified
+     ..\..\Git\GiteaManager\sherpanote\py\storage.py
+       #273            🔵  Storage System Audio Path Support
+     ..\..\Git\GiteaManager\sherpanote\main.py
+       #274  11:00 PM  🔵  Audio File Management System Identified
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+       #275            🔵  Complete System Architecture Analysis
+     ..\..\Git\GiteaManager\sherpanote\main.py
+       #276            🔵  Whisper Model Selection Logic Identified
+     C:\Users\10411\.claude\plans\peppy-knitting-bumblebee.md
+       #277  11:05 PM  ⚖️  dev-1.3.0-pre2 implementation plan established
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+       #278            🟣  Download source selector now auto-saves configuration
+     ..\..\Git\GiteaManager\sherpanote\py\model_registry.py
+       #279            🟣  Task 1 completed: download source auto-save implemented
+       #280  11:06 PM  🟣  Removed ModelScope-specific Qwen3 ASR models from registry
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\types.ts
+       #281            🟣  Task 2 completed: ModelScope Qwen3 models removed from registry
+     ..\..\Git\GiteaManager\sherpanote\py\config.py
+       #282            🟣  Added active_whisper_model field to AsrConfig dataclass
+       #283  11:07 PM  🟣  Implemented separate Whisper model selection configuration
+     ..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+       #284            🟣  Task 3 in progress: Frontend Whisper model selector implementation
+       #285            🟣  Examining existing model filtering patterns in SettingsView.vue
+       #286            🟣  Added Whisper model filter computed property to SettingsView.vue
+       #287            🟣  Examining existing model selector UI structure in SettingsView.vue
+       #288            🟣  Hidden ONNX model selectors when whisper-cpp backend selected in SettingsView
+     General
+       #289  11:23 PM  🔵  Whisper.cpp transcription producing zero segments after modifications
+       #290            🔵  Whisper.cpp command construction and execution in whispercpp.py
+       #291  11:24 PM  🔴  Changed whisper.cpp output capture from JSON file to stdout SRT format
+       #292            🔵  Code references undefined tmp_path after temp file removal
+       #293            🔴  Removed temp file references from output parsing section
+       #294  11:25 PM  🔴  Syntax error identified in whispercpp.py
+     ..\..\Git\GiteaManager\sherpanote\py\whispercpp.py
+       #295            🔵  Indentation syntax error found in whispercpp.py exception handling
+       #296  11:26 PM  🔴  Fixed exception handler indentation in whispercpp.py
+       #297            🔴  Fixed second exception handler indentation in whispercpp.py
+       #298            🔵  Additional indentation errors found in whispercpp.py exception handlers
+       #299  11:27 PM  🔴  Python indentation error in whispercpp.py
+
+### 📝 Commit Message
+
+```
+feat(whisper): 完善 Whisper 引擎集成与配置管理
+
+- 新增下载源自动保存功能，切换后配置持久化
+- 移除 ModelScope 源的两个 Qwen3 模型，保留其他源版本
+- 为 Whisper 引擎添加独立模型选择器，与 ONNX 模型区分
+- 录音/转录界面支持引擎切换，动态显示对应模型选项
+- 修复 Whisper 输出格式解析，正确显示时间戳信息
+```
+
+### 🚀 Release Notes
+
+```
+## 2026-04-14 - Whisper 引擎优化与配置管理提升
+
+### ✨ 新增
+- 下载源配置自动保存：切换下载源后配置自动保存，无需手动保存
+- 录音界面引擎切换：支持在录音/转录界面动态切换 ASR 引擎
+- 独立 Whisper 模型选择：选择 Whisper 引擎时自动过滤显示对应模型选项
+
+### 🐛 修复
+- Whisper 转录时间戳显示问题：修复 Whisper 模型输出时间解析错误
+- 模型管理界面：移除了不需要的 ModelScope 源 Qwen3 模型选项
+- 录音体验：优化录音界面引擎切换体验，正确隐藏/显示对应选项
+
+### ⚡ 优化
+- Whisper 引擎集成：完善 Whisper 与系统现有架构的融合
+- 配置管理：优化下载源和模型配置的保存逻辑
+- 模型管理：简化模型选择界面，提高用户体验
+```
+
+## dev1.3.0-pre3
+
+- Task6待实现，详细计划保存在 C:\Users\10411\.claude\plans\peppy-knitting-bumblebee.md
+- 测试了一下，whisper强制需要转成 wav 16kHz 单声道 再识别（没有自动处理功能）都这样处理吧，临时文件保存到软件目录/data/temp并在软件关闭时清理
+
+## 其他
+
+- CUDA构建打包仍未完成
+- Whisper.cpp功能在MAC平台的实现需要测试

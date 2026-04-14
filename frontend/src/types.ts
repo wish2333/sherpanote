@@ -67,6 +67,7 @@ export interface AsrConfig {
   asr_backend: string;
   active_streaming_model: string;
   active_offline_model: string;
+  active_whisper_model: string;
   auto_punctuate: boolean;
   download_source: string;
   custom_ghproxy_domain: string | null;

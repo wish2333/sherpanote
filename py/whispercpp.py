@@ -10,12 +10,17 @@ import json
 import logging
 import re
 import subprocess
-import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+# SRT timestamp pattern: [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
+_SRT_PATTERN = re.compile(
+    r"\[(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})\]\s*(.+)",
+)
 
 
 @dataclass(frozen=True)
@@ -68,12 +73,12 @@ class WhisperCppASR:
                 "Please download a GGML model from Settings."
             )
 
-        # Build command.
+        # Build command - no --output-file flags so output goes to stdout.
+        # whisper.cpp 1.8.4 default stdout format is SRT.
         cmd: list[str] = [
             str(self._binary),
             "-m", str(model_path),
             "-f", str(path),
-            "--output-json",
         ]
 
         if self._config.language and self._config.language != "auto":
@@ -118,8 +123,12 @@ class WhisperCppASR:
         if on_progress:
             on_progress(90, None)
 
-        # Parse JSON output from stdout.
-        segments = self._parse_output(result.stdout)
+        # Parse stdout (default SRT format, or JSON if supported).
+        segments: list[dict[str, Any]] = []
+        if result.stdout:
+            raw = result.stdout.strip()
+            if raw:
+                segments = self._parse_output(raw)
 
         if on_progress:
             total = max(len(segments), 1)
@@ -129,39 +138,34 @@ class WhisperCppASR:
         return segments
 
     @staticmethod
-    def _parse_output(stdout: str) -> list[dict[str, Any]]:
-        """Parse whisper.cpp JSON output into segment dicts.
+    def _parse_output(raw: str) -> list[dict[str, Any]]:
+        """Parse whisper.cpp output into segment dicts.
 
-        The JSON output contains an array of segments, each with:
-          - "text": transcribed text
-          - "t0": start time in tokens/units
-          - "t1": end time in tokens/units
-
-        whisper.cpp outputs timing in milliseconds.
+        Supports two formats:
+        1. JSON: array of segments or object with "transcription" key.
+        2. SRT: fallback when JSON parsing fails.
+           Format: [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
         """
+        # Try JSON first.
+        segments = WhisperCppASR._parse_json(raw)
+        if segments:
+            return segments
+
+        # Fallback to SRT format.
+        return WhisperCppASR._parse_srt(raw)
+
+    @staticmethod
+    def _parse_json(raw: str) -> list[dict[str, Any]]:
+        """Parse JSON output from whisper.cpp."""
         segments: list[dict[str, Any]] = []
 
         try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse whisper.cpp JSON output. Raw output:\n%s", stdout[:500])
-            # Try to extract text from raw output as fallback.
-            text = stdout.strip()
-            if text:
-                segments.append({
-                    "index": 0,
-                    "text": text,
-                    "start_time": 0.0,
-                    "end_time": 0.0,
-                    "speaker": None,
-                    "is_final": True,
-                })
-            return segments
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return []
 
-        # The output may be wrapped in an object or be a direct array.
         items = data if isinstance(data, list) else data.get("transcription", [])
 
-        # If there's a single full-text result.
         if isinstance(items, str):
             return [{
                 "index": 0,
@@ -173,28 +177,22 @@ class WhisperCppASR:
             }]
 
         for i, item in enumerate(items):
-            # whisper.cpp JSON segment format may vary.
             text = item.get("text", "").strip()
             if not text:
                 continue
 
-            # Timing can be in "timestamps" or "t0"/"t1" fields.
             start_time = 0.0
             end_time = 0.0
 
             if "timestamps" in item:
                 ts = item["timestamps"]
                 if isinstance(ts, (list, tuple)) and len(ts) >= 2:
-                    # whisper.cpp sometimes outputs token-level timestamps.
-                    # Use first and last token timestamps.
-                    first_ts = ts[0] if ts else [0]
-                    last_ts = ts[-1] if ts else [0]
+                    first_ts = ts[0]
+                    last_ts = ts[-1]
                     start_time = float(first_ts[1]) / 1000.0 if isinstance(first_ts, list) else 0.0
                     end_time = float(last_ts[1]) / 1000.0 if isinstance(last_ts, list) else 0.0
             elif "t0" in item and "t1" in item:
-                # Token-based timing (needs conversion).
-                # This is a rough estimate; exact conversion depends on model.
-                start_time = float(item["t0"]) * 0.02  # ~20ms per token at 16kHz
+                start_time = float(item["t0"]) * 0.02
                 end_time = float(item["t1"]) * 0.02
             elif "start" in item and "end" in item:
                 start_time = float(item["start"])
@@ -208,6 +206,64 @@ class WhisperCppASR:
                 "speaker": None,
                 "is_final": True,
             })
+
+        return segments
+
+    @staticmethod
+    def _parse_srt(raw: str) -> list[dict[str, Any]]:
+        """Parse SRT-format output from whisper.cpp.
+
+        Expected format per line:
+            [00:00:00.000 --> 00:00:05.260]  transcribed text
+        """
+        segments: list[dict[str, Any]] = []
+
+        for i, line in enumerate(raw.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+
+            m = _SRT_PATTERN.match(line)
+            if not m:
+                continue
+
+            start_time = (
+                int(m.group(1)) * 3600
+                + int(m.group(2)) * 60
+                + int(m.group(3))
+                + int(m.group(4)) / 1000.0
+            )
+            end_time = (
+                int(m.group(5)) * 3600
+                + int(m.group(6)) * 60
+                + int(m.group(7))
+                + int(m.group(8)) / 1000.0
+            )
+            text = m.group(9).strip()
+
+            if text:
+                segments.append({
+                    "index": i,
+                    "text": text,
+                    "start_time": round(start_time, 2),
+                    "end_time": round(end_time, 2),
+                    "speaker": None,
+                    "is_final": True,
+                })
+
+        if not segments:
+            # Last resort: return entire output as a single segment.
+            text = raw.strip()
+            if text:
+                logger.warning("Falling back to raw text: %s", text[:200])
+                segments.append({
+                    "index": 0,
+                    "text": text,
+                    "start_time": 0.0,
+                    "end_time": 0.0,
+                    "speaker": None,
+                    "is_final": True,
+                })
 
         return segments
 

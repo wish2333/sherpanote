@@ -33,6 +33,7 @@ class AsrConfig:
     asr_backend: str = "sherpa-onnx"  # "sherpa-onnx" | "whisper-cpp"
     active_streaming_model: str = ""
     active_offline_model: str = ""
+    active_whisper_model: str = ""
     auto_punctuate: bool = False
     download_source: str = "github"
     custom_ghproxy_domain: str | None = None
@@ -91,6 +92,7 @@ class AppConfig:
                 "asr_backend": self.asr.asr_backend,
                 "active_streaming_model": self.asr.active_streaming_model,
                 "active_offline_model": self.asr.active_offline_model,
+                "active_whisper_model": self.asr.active_whisper_model,
                 "auto_punctuate": self.asr.auto_punctuate,
                 "download_source": self.asr.download_source,
                 "custom_ghproxy_domain": self.asr.custom_ghproxy_domain,
@@ -143,6 +145,7 @@ class AppConfig:
                 asr_backend=asr_d.get("asr_backend", "sherpa-onnx"),
                 active_streaming_model=asr_d.get("active_streaming_model", ""),
                 active_offline_model=asr_d.get("active_offline_model", ""),
+                active_whisper_model=asr_d.get("active_whisper_model", ""),
                 auto_punctuate=asr_d.get("auto_punctuate", False),
                 download_source=download_source,
                 custom_ghproxy_domain=custom_ghproxy_domain,

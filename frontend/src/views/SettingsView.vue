@@ -334,6 +334,10 @@ const installedVadModels = computed(() =>
   installedModels.value.filter((m) => m.model_type === "vad"),
 );
 
+const installedWhisperModels = computed(() =>
+  installedModels.value.filter((m) => m.model_type === "whispercpp"),
+);
+
 // ---- Non-linear VAD threshold mapping ----
 // Raw slider 0-100 → threshold: 0-50 maps to 0.01-0.10 (fine), 50-100 maps to 0.10-0.90 (coarser)
 function vadThresholdToRaw(threshold: number): number {
@@ -1192,8 +1196,8 @@ onUnmounted(() => {
           </p>
 
           <div class="mt-4 space-y-4">
-            <!-- Active Streaming Model -->
-            <div class="form-control">
+            <!-- Active Streaming Model (hidden when whisper-cpp) -->
+            <div v-if="asrConfig.asr_backend !== 'whisper-cpp'" class="form-control">
               <label class="label">
                 <span class="label-text font-medium">流式识别模型</span>
               </label>
@@ -1213,8 +1217,8 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <!-- Active Offline Model -->
-            <div class="form-control">
+            <!-- Active Offline Model (hidden when whisper-cpp) -->
+            <div v-if="asrConfig.asr_backend !== 'whisper-cpp'" class="form-control">
               <label class="label">
                 <span class="label-text font-medium">离线识别模型</span>
               </label>
@@ -1485,6 +1489,27 @@ onUnmounted(() => {
                 whisper.cpp 不支持实时录音。选择此引擎后，请使用文件导入功能进行转写。
                 模型请在"模型管理"页面下载 whisper.cpp (GGML) 类型的模型。
               </p>
+
+              <!-- Whisper Model Selector -->
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text font-medium text-sm">Whisper 模型</span>
+                </label>
+                <select
+                  v-model="asrConfig.active_whisper_model"
+                  class="select select-bordered select-sm w-full"
+                  @change="saveConfig"
+                >
+                  <option value="">(自动检测)</option>
+                  <option
+                    v-for="m in installedWhisperModels"
+                    :key="m.model_id"
+                    :value="m.model_id"
+                  >
+                    {{ availableModels.find(e => e.model_id === m.model_id)?.display_name ?? m.model_id }}
+                  </option>
+                </select>
+              </div>
             </div>
 
             <!-- GPU Toggle -->
@@ -1566,6 +1591,7 @@ onUnmounted(() => {
               <select
                 v-model="asrConfig.download_source"
                 class="select select-bordered w-full"
+                @change="saveConfig"
               >
                 <option v-for="src in downloadSources" :key="src.value" :value="src.value">
                   {{ src.label }}

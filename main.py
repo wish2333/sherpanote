@@ -1033,7 +1033,7 @@ class SherpaNoteAPI(Bridge):
 
             # Use the active whisper.cpp model.
             model_dir = Path(self._config.asr.model_dir or _DEFAULT_MODELS_DIR)
-            model_id = self._config.asr.active_offline_model
+            model_id = self._config.asr.active_whisper_model or self._config.asr.active_offline_model
             model_path = ""
             if model_id and model_id.startswith("whisper-ggml-"):
                 model_path = str(model_dir / model_id / f"ggml-{model_id.replace('whisper-ggml-', '')}.bin")

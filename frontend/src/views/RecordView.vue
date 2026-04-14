@@ -74,6 +74,10 @@ const installedOfflineModels = computed(() =>
   installedModels.value.filter((m) => m.model_type === "offline"),
 );
 
+const installedWhisperModels = computed(() =>
+  installedModels.value.filter((m) => m.model_type === "whispercpp"),
+);
+
 function displayName(modelId: string): string {
   return availableModels.value.find((m) => m.model_id === modelId)?.display_name ?? modelId;
 }
@@ -259,8 +263,21 @@ onUnmounted(() => {
       v-if="!isRecording && !isTranscribingFile && !isLoadingModel && !isImporting"
       class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-base-300 bg-base-200 p-3 text-sm"
     >
-      <!-- Streaming Model -->
+      <!-- ASR Engine -->
       <div class="flex items-center gap-1.5">
+        <label class="text-base-content/50 whitespace-nowrap">引擎:</label>
+        <select
+          v-model="store.asrConfig.asr_backend"
+          class="select select-bordered select-sm min-w-[130px]"
+          @change="saveQuickSetting"
+        >
+          <option value="sherpa-onnx">sherpa-onnx</option>
+          <option value="whisper-cpp">whisper.cpp</option>
+        </select>
+      </div>
+
+      <!-- Streaming Model (hidden when whisper-cpp) -->
+      <div v-if="store.asrConfig.asr_backend !== 'whisper-cpp'" class="flex items-center gap-1.5">
         <label class="text-base-content/50 whitespace-nowrap">流式模型:</label>
         <select
           v-model="store.asrConfig.active_streaming_model"
@@ -276,8 +293,8 @@ onUnmounted(() => {
         </select>
       </div>
 
-      <!-- Offline Model -->
-      <div class="flex items-center gap-1.5">
+      <!-- Offline Model (hidden when whisper-cpp) -->
+      <div v-if="store.asrConfig.asr_backend !== 'whisper-cpp'" class="flex items-center gap-1.5">
         <label class="text-base-content/50 whitespace-nowrap">离线模型:</label>
         <select
           v-model="store.asrConfig.active_offline_model"
@@ -287,6 +304,23 @@ onUnmounted(() => {
           <option value="">(自动)</option>
           <option
             v-for="m in installedOfflineModels"
+            :key="m.model_id"
+            :value="m.model_id"
+          >{{ displayName(m.model_id) }}</option>
+        </select>
+      </div>
+
+      <!-- Whisper Model (shown when whisper-cpp) -->
+      <div v-if="store.asrConfig.asr_backend === 'whisper-cpp'" class="flex items-center gap-1.5">
+        <label class="text-base-content/50 whitespace-nowrap">Whisper模型:</label>
+        <select
+          v-model="store.asrConfig.active_whisper_model"
+          class="select select-bordered select-sm min-w-[160px]"
+          @change="saveQuickSetting"
+        >
+          <option value="">(自动)</option>
+          <option
+            v-for="m in installedWhisperModels"
             :key="m.model_id"
             :value="m.model_id"
           >{{ displayName(m.model_id) }}</option>
