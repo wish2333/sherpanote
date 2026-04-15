@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Smart file detection: auto-skip duplicate copies during import
 - Video download support for transcription (`py/video_downloader.py`)
 - Audio format optimization: WAV to MP3 conversion, 90%+ file size reduction
+- Added a complete yt-dlp/ffmpeg dependency management interface for direct in-app installation
+- Added support for cookie file configuration to download authenticated videos
+- Enhanced Whisper.cpp support to prioritize using Homebrew-installed binaries
 
 ### Fixed
 
@@ -37,6 +40,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - ASR initialization errors, improved transcription stability
 - `sherpa-onnx` CUDA variant `+cuda` suffix detection instead of broken `import onnxruntime`
 - `uv run` re-syncing `.venv` and undoing CUDA package installs
+- Fixed the issue on macOS where whisper-cli executable file was missing after Whisper.cpp installation
+- Resolved download failure errors caused by “ffmpeg not found”
 
 ### Changed
 
@@ -49,6 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Frontend display: audio manager prioritizes user-friendly titles/filenames
 - CUDA build method: now correctly supports `--cuda` flag with isolated venv approach
 - `app.spec` collects sherpa-onnx lib/ DLLs (including `onnxruntime_providers_cuda.dll`)
+- Optimized cross-platform tool detection to search for installation paths by priority
+- Real-time dependency status detection with clear installation guidance
+- Optimized settings interface layout with more intuitive dependency management instructions
 
 ---
 

@@ -1,5 +1,7 @@
 ## 2026-04-15 - Whisper, CUDA, 网络视频转录
 
+[update-1.3.0](https://github.com/wish2333/sherpanote/releases/tag/update-1.3.0)
+
 ### 新增功能
 
 - 实时进度显示，展示片段数量，例如“42% (15/30)”
@@ -14,6 +16,9 @@
 - 智能文件检测：导入时自动跳过重复文件
 - 支持为转录下载视频 (`py/video_downloader.py`)
 - 音频格式优化：WAV 转 MP3，文件大小减少 90% 以上
+- 添加完整的 yt-dlp/ffmpeg 依赖管理界面，可直接应用内安装
+- 支持 Cookie 文件配置，可登录下载需要认证的视频
+- 增强的 Whisper.cpp 支持优先使用 Homebrew 安装的 binary
 
 ### 已修复问题
 
@@ -29,6 +34,8 @@
 - ASR 初始化错误，提高了转录稳定性
 - `sherpa-onnx` CUDA 变体现在通过 `+cuda` 后缀检测，而非错误的 `import onnxruntime`
 - `uv run` 重新同步 `.venv` 并撤销 CUDA 包安装的问题
+- 修复 macOS 上 Whisper.cpp 安装后缺少 whisper-cli 可执行文件的问题
+- 解决 "ffmpeg not found" 导致的下载失败错误
 
 ### 变更
 
@@ -41,6 +48,9 @@
 - 前端显示：音频管理器优先显示用户友好的标题/文件名
 - CUDA 构建方法：现已正确支持 `--cuda` 参数，并采用虚拟环境隔离
 - `app.spec` 会收集 sherpa-onnx 的 lib/ DLL 文件（包括 `onnxruntime_providers_cuda.dll`）
+- 跨平台工具检测优化，按优先级查找安装路径
+- 依赖状态实时检测，提供清晰的安装指引
+- 优化设置界面布局，添加更直观的依赖管理说明
 
 ## 2026-04-10 - 模拟流式识别与体验优化
 
