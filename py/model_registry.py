@@ -269,6 +269,30 @@ MODELS: tuple[ModelEntry, ...] = (
         sources=("huggingface", "hf_mirror"),
         hf_repo_id="ggerganov/whisper.cpp",
     ),
+    ModelEntry(
+        model_id="whisper-ggml-large-v3-turbo",
+        display_name="Whisper Large v3 Turbo (GGML / whisper.cpp)",
+        model_type="whispercpp",
+        languages=("en", "zh", "ja", "ko", "de", "fr", "es", "it", "pt", "ru"),
+        size_mb=1550,
+        archive_name="ggml-large-v3-turbo.bin",
+        description="Whisper large v3 turbo for whisper.cpp. Near large-v3 accuracy with much better speed. Recommended for most use cases.",
+        required_files=("ggml-large-v3-turbo.bin",),
+        sources=("huggingface", "hf_mirror"),
+        hf_repo_id="ggerganov/whisper.cpp",
+    ),
+    ModelEntry(
+        model_id="whisper-ggml-large-v3-turbo-q5_0",
+        display_name="Whisper Large v3 Turbo Q5 (GGML / whisper.cpp)",
+        model_type="whispercpp",
+        languages=("en", "zh", "ja", "ko", "de", "fr", "es", "it", "pt", "ru"),
+        size_mb=548,
+        archive_name="ggml-large-v3-turbo-q5_0.bin",
+        description="Whisper large v3 turbo quantized (Q5_0). Good accuracy/speed/size trade-off. Suitable for CPU inference.",
+        required_files=("ggml-large-v3-turbo-q5_0.bin",),
+        sources=("huggingface", "hf_mirror"),
+        hf_repo_id="ggerganov/whisper.cpp",
+    ),
 )
 _MODEL_INDEX: dict[str, ModelEntry] = {m.model_id: m for m in MODELS}
 

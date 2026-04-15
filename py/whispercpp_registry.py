@@ -2,18 +2,19 @@
 
 Provides platform-specific binary metadata, download URLs,
 and installation status checks for the whisper.cpp CLI tool.
+
+Supports multi-variant coexistence: each variant (cpu, blas, cuda-11.8, etc.)
+is stored in its own subdirectory under the install root. Switching between
+variants only updates a pointer file -- no re-download required.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -31,6 +32,9 @@ WHISPER_CPP_VERSION = "1.8.4"
 GITHUB_RELEASE_BASE = (
     f"https://github.com/ggerganov/whisper.cpp/releases/download/v{WHISPER_CPP_VERSION}"
 )
+
+# File that records which variant is currently active.
+_ACTIVE_VARIANT_FILE = "_active_variant.txt"
 
 
 @dataclass(frozen=True)
@@ -117,10 +121,31 @@ def get_default_binary() -> WhisperCppBinary | None:
 
 
 def get_install_dir(data_dir: str | Path) -> Path:
-    """Return the directory where whisper.cpp binary should be installed."""
+    """Return the root directory for whisper.cpp installations."""
     base = Path(data_dir) / "whisper.cpp"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def get_variant_dir(data_dir: str | Path, variant: str) -> Path:
+    """Return the subdirectory for a specific variant."""
+    return get_install_dir(data_dir) / variant
+
+
+def get_active_variant(data_dir: str | Path) -> str | None:
+    """Return the currently active variant, or None."""
+    variant_file = get_install_dir(data_dir) / _ACTIVE_VARIANT_FILE
+    if variant_file.exists():
+        text = variant_file.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    return None
+
+
+def set_active_variant(data_dir: str | Path, variant: str) -> None:
+    """Set the active variant by writing the pointer file."""
+    variant_file = get_install_dir(data_dir) / _ACTIVE_VARIANT_FILE
+    variant_file.write_text(variant, encoding="utf-8")
 
 
 def _find_binary_in_dir(directory: Path) -> Path | None:
@@ -133,15 +158,31 @@ def _find_binary_in_dir(directory: Path) -> Path | None:
     return None
 
 
+def _get_active_variant_dir(data_dir: str | Path) -> Path | None:
+    """Return the directory of the currently active variant, or None."""
+    active = get_active_variant(data_dir)
+    if active:
+        vdir = get_variant_dir(data_dir, active)
+        if vdir.exists() and _find_binary_in_dir(vdir):
+            return vdir
+    # Backward compat: check flat install (pre-multi-variant layout).
+    install_dir = get_install_dir(data_dir)
+    if _find_binary_in_dir(install_dir):
+        return install_dir
+    return None
+
+
 def get_binary_path(data_dir: str | Path) -> Path:
-    """Return the expected path to the whisper-cli executable."""
+    """Return the path to the active whisper-cli executable."""
     install_dir = get_install_dir(data_dir)
 
-    # Windows: check app-managed dir, then system PATH.
+    # Windows: check app-managed variant dirs, then system PATH.
     if sys.platform == "win32":
-        found = _find_binary_in_dir(install_dir)
-        if found:
-            return found
+        active_dir = _get_active_variant_dir(data_dir)
+        if active_dir:
+            found = _find_binary_in_dir(active_dir)
+            if found:
+                return found
         system_binary = shutil.which("whisper-cli")
         if system_binary:
             return Path(system_binary)
@@ -178,19 +219,29 @@ def get_macos_binary_path(data_dir: str | Path) -> Path | None:
     if system_binary:
         return Path(system_binary)
 
-    # 3. Try inside xcframework structure.
+    # 3. Try inside xcframework structure (legacy flat install or variant subdir).
     install_dir = get_install_dir(data_dir)
-    if machine in ("arm64", "aarch64"):
-        sub = "macos-arm64"
-    else:
-        sub = "macos-x86_64"
-    xcframework = install_dir / "whisper.xcframework" / sub / "whisper-cli"
-    if xcframework.exists():
-        return xcframework
+    active_dir = _get_active_variant_dir(data_dir)
+    search_dirs = [active_dir, install_dir] if active_dir and active_dir != install_dir else [install_dir]
+    for search_dir in search_dirs:
+        if search_dir is None:
+            continue
+        if machine in ("arm64", "aarch64"):
+            sub = "macos-arm64"
+        else:
+            sub = "macos-x86_64"
+        xcframework = search_dir / "whisper.xcframework" / sub / "whisper-cli"
+        if xcframework.exists():
+            return xcframework
 
     # 4. Fallback: direct binary in install dir.
-    found = _find_binary_in_dir(install_dir)
-    return found
+    for search_dir in search_dirs:
+        if search_dir is None:
+            continue
+        found = _find_binary_in_dir(search_dir)
+        if found:
+            return found
+    return None
 
 
 def is_installed(data_dir: str | Path) -> bool:
@@ -223,6 +274,23 @@ def is_installed(data_dir: str | Path) -> bool:
         return True
 
 
+def is_variant_installed(data_dir: str | Path, variant: str) -> bool:
+    """Check if a specific variant has been downloaded."""
+    vdir = get_variant_dir(data_dir, variant)
+    return vdir.exists() and _find_binary_in_dir(vdir) is not None
+
+
+def get_installed_variants(data_dir: str | Path) -> list[str]:
+    """Return list of variants that have been downloaded."""
+    install_dir = get_install_dir(data_dir)
+    available = {b.variant for b in get_available_binaries()}
+    installed = []
+    for child in install_dir.iterdir():
+        if child.is_dir() and child.name in available and _find_binary_in_dir(child):
+            installed.append(child.name)
+    return sorted(installed)
+
+
 def install_binary(
     data_dir: str | Path,
     variant: str | None = None,
@@ -231,6 +299,9 @@ def install_binary(
     proxy_url: str | None = None,
 ) -> dict[str, Any]:
     """Download and install whisper.cpp binary for the current platform.
+
+    If the requested variant is already downloaded, this only switches the
+    active pointer -- no re-download occurs.
 
     Args:
         data_dir: Application data directory.
@@ -241,7 +312,7 @@ def install_binary(
         proxy_url: Proxy URL when mode is "custom".
 
     Returns:
-        Dict with "success", "path", "variant", "version".
+        Dict with "success", "variant", "version".
     """
     current = _current_platform()
 
@@ -271,9 +342,10 @@ def install_binary(
                 "variant": "homebrew",
                 "version": WHISPER_CPP_VERSION,
                 "source": "homebrew",
+                "switched": False,
             }
 
-    # macOS: no pre-built CLI in the official release — guide user to Homebrew.
+    # macOS: no pre-built CLI in the official release -- guide user to Homebrew.
     if _IS_MACOS:
         return {
             "success": False,
@@ -284,7 +356,24 @@ def install_binary(
             "suggest_brew": True,
         }
 
-    # Download (Windows only).
+    # Check if this variant is already downloaded.
+    already_downloaded = is_variant_installed(data_dir, binary.variant)
+
+    if already_downloaded:
+        # Just switch the active pointer.
+        set_active_variant(data_dir, binary.variant)
+        logger.info("Switched to existing variant: %s", binary.variant)
+        return {
+            "success": True,
+            "variant": binary.variant,
+            "version": WHISPER_CPP_VERSION,
+            "switched": True,
+        }
+
+    # Download and extract to variant-specific subdirectory.
+    variant_dir = get_variant_dir(data_dir, binary.variant)
+    variant_dir.mkdir(parents=True, exist_ok=True)
+
     tmp_path = install_dir / "_download.tmp"
     try:
         _download_file(
@@ -294,20 +383,25 @@ def install_binary(
             proxy_url=proxy_url,
         )
 
-        # Extract.
-        _extract_binary(tmp_path, install_dir, current)
+        # Extract to variant subdirectory.
+        _extract_binary(tmp_path, variant_dir, current)
 
-        # Verify.
-        if not is_installed(data_dir):
+        # Verify the new variant.
+        found = _find_binary_in_dir(variant_dir)
+        if not found:
             return {
                 "success": False,
-                "error": "Binary installed but verification failed",
+                "error": "Binary installed but not found after extraction",
             }
+
+        # Set as active.
+        set_active_variant(data_dir, binary.variant)
 
         return {
             "success": True,
             "variant": binary.variant,
             "version": WHISPER_CPP_VERSION,
+            "switched": False,
         }
     except Exception as exc:
         logger.exception("Failed to install whisper.cpp binary")
@@ -366,37 +460,27 @@ def _extract_binary(archive: Path, dest: Path, platform_id: str) -> None:
 
     with zipfile.ZipFile(archive, "r") as zf:
         if platform_id == "windows-x64":
-            # Extract all files, flattening any subdirectory structure.
-            # This ensures DLLs (whisper.dll, ggml.dll, etc.) are present
-            # alongside main.exe.
             extracted_names: list[str] = []
             for name in zf.namelist():
                 if name.endswith("/"):
                     continue
                 basename = name.rsplit("/", 1)[-1]
-                # Skip subdirectory entries that create nested dirs.
-                if "/" in name:
-                    target = dest / basename
-                else:
-                    target = dest / basename
+                target = dest / basename
                 with zf.open(name) as src, open(target, "wb") as dst:
                     dst.write(src.read())
                 extracted_names.append(basename)
 
-            # Verify main.exe was extracted.
             if not any(n.lower() == "main.exe" for n in extracted_names):
                 raise FileNotFoundError(
                     f"main.exe not found in archive. Contents: {extracted_names[:10]}"
                 )
             logger.info("Extracted %d files to %s", len(extracted_names), dest)
         else:
-            # macOS / Linux: preserve xcframework directory structure.
             has_xcframework = any("xcframework" in n for n in zf.namelist())
             if has_xcframework:
                 zf.extractall(dest)
                 logger.info("Extracted xcframework to %s", dest)
             else:
-                # Fallback: extract individual binary + libraries.
                 for name in zf.namelist():
                     if name.endswith("/"):
                         continue
@@ -409,8 +493,34 @@ def _extract_binary(archive: Path, dest: Path, platform_id: str) -> None:
                     logger.info("Extracted %s to %s", basename, target)
 
 
-def uninstall_binary(data_dir: str | Path) -> bool:
-    """Remove the whisper.cpp installation directory."""
+def uninstall_binary(data_dir: str | Path, variant: str | None = None) -> bool:
+    """Remove whisper.cpp installation.
+
+    Args:
+        data_dir: Application data directory.
+        variant: If specified, only remove this variant's subdirectory.
+            If None, remove the entire whisper.cpp install directory.
+
+    Returns:
+        True if anything was removed.
+    """
+    if variant:
+        vdir = get_variant_dir(data_dir, variant)
+        if vdir.exists():
+            shutil.rmtree(vdir)
+            # If the removed variant was active, clear the pointer.
+            if get_active_variant(data_dir) == variant:
+                # Try to auto-switch to another installed variant.
+                remaining = get_installed_variants(data_dir)
+                if remaining:
+                    set_active_variant(data_dir, remaining[0])
+                else:
+                    pointer = get_install_dir(data_dir) / _ACTIVE_VARIANT_FILE
+                    pointer.unlink(missing_ok=True)
+            return True
+        return False
+
+    # Remove everything.
     install_dir = get_install_dir(data_dir)
     if not install_dir.exists():
         return False
@@ -423,7 +533,29 @@ def get_status(data_dir: str | Path) -> dict[str, Any]:
     installed = is_installed(data_dir)
     available = get_available_binaries()
 
-    # Detect installation source.
+    current_variant = get_active_variant(data_dir)
+    installed_variants = get_installed_variants(data_dir)
+
+    # Migrate legacy flat install to variant-based layout.
+    if installed and not current_variant and not installed_variants:
+        install_dir = get_install_dir(data_dir)
+        if _find_binary_in_dir(install_dir) and not _IS_MACOS:
+            # Existing flat install detected. Treat it as the default variant.
+            default = get_default_binary()
+            if default:
+                variant_dir = get_variant_dir(data_dir, default.variant)
+                if not variant_dir.exists():
+                    variant_dir.mkdir(parents=True, exist_ok=True)
+                    # Move files from root to variant subdir.
+                    for child in install_dir.iterdir():
+                        if child.is_file() and child.name != _ACTIVE_VARIANT_FILE:
+                            child.rename(variant_dir / child.name)
+                    set_active_variant(data_dir, default.variant)
+                    current_variant = default.variant
+                    installed_variants = [default.variant]
+                    logger.info("Migrated flat install to variant layout: %s", default.variant)
+
+    # Detect installation source (macOS).
     source = None
     if installed and _IS_MACOS:
         system_binary = get_macos_binary_path(data_dir)
@@ -436,5 +568,7 @@ def get_status(data_dir: str | Path) -> dict[str, Any]:
         "platform": _current_platform(),
         "available_variants": [b.variant for b in available],
         "default_variant": get_default_binary().variant if available else None,
+        "current_variant": current_variant,
+        "installed_variants": installed_variants,
         "source": source,
     }

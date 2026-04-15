@@ -299,6 +299,16 @@ async function handleDeleteProcessingPreset(presetId: string) {
   }
 }
 
+async function resetBuiltinPresets() {
+  const res = await call("reset_builtin_presets");
+  if (res.success) {
+    store.showToast("Built-in presets restored to defaults", "success");
+    await loadProcessingPresets();
+  } else {
+    store.showToast(res.error ?? "Failed to reset presets", "error");
+  }
+}
+
 // ---- Model management state ----
 const availableModels = ref<ModelEntry[]>([]);
 const installedModels = ref<InstalledModel[]>([]);
@@ -427,12 +437,36 @@ async function handlePickDirectory() {
 
 // ---- whisper.cpp binary management ----
 
+const selectedWhisperVariant = ref("");
+
+function variantLabel(v: string): string {
+  const labels: Record<string, string> = {
+    cpu: "CPU (通用)",
+    blas: "BLAS (CPU 优化，推荐)",
+    "cuda-11.8": "CUDA 11.8 (GPU 加速)",
+    "cuda-12.4": "CUDA 12.4 (GPU 加速)",
+  };
+  return labels[v] ?? v;
+}
+
 async function handleInstallWhisper() {
+  const variant = selectedWhisperVariant.value || undefined;
+  const isAlreadyDownloaded = (whisperStatus.value?.installed_variants ?? []).includes(variant ?? "");
+
+  if (whisperStatus.value?.installed && !isAlreadyDownloaded) {
+    if (!confirm(`将下载 ${variant ?? "默认"} 版本，与当前版本共存。确定？`)) {
+      return;
+    }
+  }
+
   isInstallingWhisper.value = true;
   try {
-    const res = await installWhisperBinary();
+    const res = await installWhisperBinary(variant);
     if (res.success) {
-      store.showToast("whisper.cpp installed successfully", "success");
+      const msg = res.data?.switched
+        ? `已切换到 ${variant ?? "默认"} 版本`
+        : `${variant ?? "默认"} 版本安装成功`;
+      store.showToast(msg, "success");
       const statusRes = await getWhisperBinaryStatus();
       if (statusRes.success && statusRes.data) {
         whisperStatus.value = statusRes.data;
@@ -463,11 +497,20 @@ async function loadDependencyStatus() {
 }
 
 async function handleInstallFfmpeg() {
+  if (depStatus.value?.ffmpeg.installed) {
+    if (!confirm("ffmpeg 已安装，是否重新下载 static-ffmpeg？下载后将自动替换路径配置。")) {
+      return;
+    }
+  }
   isInstallingFfmpeg.value = true;
   try {
     const res = await installStaticFfmpeg();
     if (res.success) {
       store.showToast("ffmpeg 安装成功", "success");
+      if (res.data?.path) {
+        asrConfig.value = { ...asrConfig.value, ffmpeg_path: res.data.path };
+        saveConfig();
+      }
       await loadDependencyStatus();
     } else {
       store.showToast(res.error ?? "ffmpeg 安装失败", "error");
@@ -660,6 +703,7 @@ onMounted(async () => {
   const whisperRes = await getWhisperBinaryStatus();
   if (whisperRes.success && whisperRes.data) {
     whisperStatus.value = whisperRes.data;
+    selectedWhisperVariant.value = whisperRes.data.current_variant ?? whisperRes.data.default_variant ?? "";
   }
   // Check dependency status (ffmpeg, yt-dlp)
   await loadDependencyStatus();
@@ -840,7 +884,6 @@ onUnmounted(() => {
               </label>
               <div class="flex items-center gap-2">
                 <button
-                  v-if="!depStatus?.ffmpeg.installed"
                   class="btn btn-primary btn-xs"
                   :disabled="isInstallingFfmpeg"
                   @click="handleInstallFfmpeg"
@@ -848,8 +891,11 @@ onUnmounted(() => {
                   <span v-if="isInstallingFfmpeg" class="loading loading-spinner loading-xs"></span>
                   {{ isInstallingFfmpeg ? '安装中...' : '安装 static-ffmpeg' }}
                 </button>
-                <span class="text-xs text-base-content/40">
+                <span v-if="!depStatus?.ffmpeg.installed" class="text-xs text-base-content/40">
                   如已安装但未检测到，可手动指定路径：
+                </span>
+                <span v-else class="text-xs text-base-content/40">
+                  当前已通过 {{ depStatus.ffmpeg.source }} 安装，点击可重新下载 static-ffmpeg
                 </span>
               </div>
               <div class="flex gap-2 mt-1">
@@ -883,11 +929,9 @@ onUnmounted(() => {
               <label class="label">
                 <span class="label-text font-medium">yt-dlp Cookie 文件</span>
               </label>
-              <label class="label">
-                <span class="label-text-alt text-base-content/40">
-                  用于下载需要登录的视频（如 Bilibili、YouTube 会员内容）。请选择 Netscape 格式的 cookie 文件。
-                </span>
-              </label>
+              <p class="text-xs text-base-content/40 mt-1">
+                用于下载需要登录的视频（如 Bilibili、YouTube 会员内容）。请选择 Netscape 格式的 cookie 文件。
+              </p>
               <div class="flex gap-2">
                 <input
                   v-model="asrConfig.ytdlp_cookie_path"
@@ -1226,12 +1270,20 @@ onUnmounted(() => {
         <div class="card-body">
           <div class="flex items-center justify-between">
             <h2 class="card-title text-base">AI 处理预设</h2>
-            <button
-              class="btn btn-outline btn-sm"
-              @click="openNewProcessingPresetForm"
-            >
-              添加预设
-            </button>
+            <div class="flex gap-2">
+              <button
+                class="btn btn-outline btn-sm"
+                @click="resetBuiltinPresets"
+              >
+                恢复内置默认
+              </button>
+              <button
+                class="btn btn-outline btn-sm"
+                @click="openNewProcessingPresetForm"
+              >
+                添加预设
+              </button>
+            </div>
           </div>
           <p class="text-sm text-base-content/60">
             管理 AI 文本处理的提示词模板。内置预设不可删除。
@@ -1602,32 +1654,51 @@ onUnmounted(() => {
             <div v-if="asrConfig.asr_backend === 'whisper-cpp'" class="space-y-3 rounded-lg border border-base-300 bg-base-200 p-4">
               <h4 class="font-medium text-sm">whisper.cpp 设置</h4>
 
-              <!-- Binary status -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <span class="text-sm">
-                    二进制状态:
-                    <span v-if="whisperStatus?.installed" class="text-success">已安装 (v{{ whisperStatus.version }}{{ whisperStatus.source === 'homebrew' ? ', Homebrew' : '' }})</span>
-                    <span v-else class="text-error">未安装</span>
+              <!-- Binary variant selector -->
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text font-medium text-sm">二进制版本</span>
+                  <span v-if="whisperStatus?.installed" class="badge badge-success badge-sm">
+                    {{ variantLabel(whisperStatus.current_variant ?? whisperStatus.default_variant ?? '') }}
                   </span>
-                </div>
-                <div class="flex gap-2">
-                  <button
-                    v-if="!whisperStatus?.installed"
-                    class="btn btn-primary btn-xs"
-                    :disabled="isInstallingWhisper"
-                    @click="handleInstallWhisper"
+                  <span v-else class="badge badge-error badge-sm">未安装</span>
+                </label>
+                <select
+                  v-model="selectedWhisperVariant"
+                  class="select select-bordered select-sm w-full"
+                  :disabled="isInstallingWhisper"
+                >
+                  <option
+                    v-for="v in whisperStatus?.available_variants ?? []"
+                    :key="v"
+                    :value="v"
                   >
-                    {{ isInstallingWhisper ? '安装中...' : '安装' }}
-                  </button>
-                  <button
-                    v-else
-                    class="btn btn-error btn-xs"
-                    @click="handleUninstallWhisper"
-                  >
-                    卸载
-                  </button>
-                </div>
+                    {{ variantLabel(v) }}{{ (whisperStatus?.installed_variants ?? []).includes(v) ? ' [已下载]' : '' }}
+                  </option>
+                </select>
+                <p class="text-xs text-base-content/40 mt-1">
+                  CUDA 版本需要 NVIDIA 显卡和对应版本的 CUDA Toolkit。
+                  已下载的版本切换时无需重新下载。
+                </p>
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  class="btn btn-primary btn-xs"
+                  :disabled="isInstallingWhisper"
+                  @click="handleInstallWhisper"
+                >
+                  <span v-if="isInstallingWhisper" class="loading loading-spinner loading-xs"></span>
+                  {{ whisperStatus?.installed ? (isInstallingWhisper ? '切换中...' : '切换版本') : (isInstallingWhisper ? '安装中...' : '安装') }}
+                </button>
+                <button
+                  v-if="whisperStatus?.installed"
+                  class="btn btn-error btn-xs"
+                  :disabled="isInstallingWhisper"
+                  @click="handleUninstallWhisper"
+                >
+                  卸载
+                </button>
               </div>
 
               <p class="text-xs text-base-content/40">

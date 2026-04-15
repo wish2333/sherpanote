@@ -160,6 +160,8 @@ export interface WhisperBinaryStatus {
   platform: string;
   available_variants: string[];
   default_variant: string | null;
+  current_variant?: string | null;
+  installed_variants?: string[];
   source?: string;
 }
 
