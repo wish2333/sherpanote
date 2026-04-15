@@ -145,6 +145,11 @@ async function handleFileSelected(filePath: string) {
 const isImporting = ref(false);
 const importProgress = ref(0);
 
+// Video Download & Transcribe
+const downloadUrl = ref("");
+const isDownloading = ref(false);
+const downloadProgress = ref(0);
+
 async function handleImportAndTranscribe() {
   const res = await call<string[]>("pick_audio_file");
   if (!res.success || !res.data || res.data.length === 0) return;
@@ -191,6 +196,75 @@ async function startImportTranscribe(filePath: string) {
         offProgress();
         isImporting.value = false;
         store.showToast(detail.error ?? "Import transcription failed", "error");
+        resolve();
+      },
+    );
+  });
+}
+
+import { downloadAndTranscribe } from "../bridge";
+
+async function handleDownloadAndTranscribe() {
+  if (!downloadUrl.value) {
+    store.showToast("请输入视频链接", "warning");
+    return;
+  }
+
+  isDownloading.value = true;
+  downloadProgress.value = 0;
+  isImporting.value = true; // Reuse importing state for transcription phase
+  importProgress.value = 0;
+
+  // Listen for download progress
+  const offDownloadProgress = onEvent<{ percent: number }>(
+    "download_progress",
+    ({ percent }) => {
+      downloadProgress.value = percent;
+    },
+  );
+
+  // Listen for transcription progress
+  const offTranscribeProgress = onEvent<{ percent: number }>(
+    "transcribe_progress",
+    ({ percent }) => {
+      importProgress.value = percent;
+    },
+  );
+
+  const res = await downloadAndTranscribe(downloadUrl.value);
+  if (!res.success) {
+    isDownloading.value = false;
+    isImporting.value = false;
+    offDownloadProgress();
+    offTranscribeProgress();
+    store.showToast(res.error ?? "Failed to start download", "error");
+    return;
+  }
+
+  // Wait for completion.
+  await new Promise<void>((resolve) => {
+    const offComplete = onEvent<{ record_id: string }>(
+      "import_transcribe_complete",
+      (detail) => {
+        offComplete();
+        offDownloadProgress();
+        offTranscribeProgress();
+        isDownloading.value = false;
+        isImporting.value = false;
+        router.push(`/editor/${detail.record_id}`);
+        resolve();
+      },
+    );
+    const offError = onEvent<{ error: string }>(
+      "transcribe_error",
+      (detail) => {
+        offError();
+        offComplete();
+        offDownloadProgress();
+        offTranscribeProgress();
+        isDownloading.value = false;
+        isImporting.value = false;
+        store.showToast(detail.error ?? "Download/Transcription failed", "error");
         resolve();
       },
     );
@@ -382,22 +456,51 @@ onUnmounted(() => {
       </div>
 
       <!-- Default idle state -->
-      <div v-else class="flex items-center justify-between p-4">
-        <div class="flex items-center gap-2 text-sm text-base-content/70">
-          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-          <span>拖放音频文件到此处，或</span>
+      <div v-else class="flex flex-col gap-4 p-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 text-sm text-base-content/70">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span>拖放音频文件到此处，或</span>
+          </div>
+          <button
+            v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
+            class="btn btn-secondary btn-sm"
+            @click="handleImportAndTranscribe"
+          >
+            导入并转写
+          </button>
         </div>
-        <button
-          v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
-          class="btn btn-secondary btn-sm"
-          @click="handleImportAndTranscribe"
-        >
-          导入并转写
-        </button>
+
+        <div class="flex items-center gap-2">
+          <div class="flex-1">
+            <input
+              v-model="downloadUrl"
+              type="text"
+              placeholder="输入视频链接 (Bilibili, YouTube 等)"
+              class="input input-bordered input-sm w-full"
+              :disabled="isRecording || isTranscribingFile || isLoadingModel || isDownloading"
+            />
+          </div>
+          <button
+            v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
+            class="btn btn-primary btn-sm"
+            :disabled="isDownloading || !downloadUrl"
+            @click="handleDownloadAndTranscribe"
+          >
+            <span v-if="!isDownloading">下载转写</span>
+            <span v-else class="loading loading-spinner"></span>
+          </button>
+        </div>
+
+        <div v-if="isDownloading" class="flex items-center gap-3 text-sm">
+          <span class="text-base-content/60">下载中...</span>
+          <progress class="progress progress-primary flex-1" :value="downloadProgress" max="100"></progress>
+          <span>{{ downloadProgress }}%</span>
+        </div>
       </div>
     </div>
 

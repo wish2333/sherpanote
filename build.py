@@ -63,6 +63,41 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent
 
 
+# ========== venv helpers ==========
+
+
+def _venv_python() -> Path:
+    """Return the path to the project .venv Python executable."""
+    if sys.platform == "win32":
+        return PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    return PROJECT_ROOT / ".venv" / "bin" / "python"
+
+
+def _ensure_pyinstaller_in_venv() -> None:
+    """Install PyInstaller into the project .venv if not already present."""
+    py = _venv_python()
+    if not py.exists():
+        _error("Project .venv not found. Run 'uv sync' first.")
+
+    result = subprocess.run(
+        [str(py), "-c", "import PyInstaller; print(PyInstaller.__version__)"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        _info(f"PyInstaller {result.stdout.strip()} in .venv")
+        return
+
+    _info("Installing PyInstaller into .venv ...")
+    uv = _find_cmd("uv")
+    if uv is None:
+        _error("uv not found.")
+    r = subprocess.run(
+        [uv, "pip", "install", "--python", str(py), "pyinstaller>=6.19.0"],
+    )
+    if r.returncode != 0:
+        _error("Failed to install PyInstaller into .venv")
+
+
 # ========== helpers ==========
 
 def _info(msg: str) -> None:
@@ -123,16 +158,9 @@ def _clean() -> None:
 
 def _build_onedir(
     bundled_model_dirs: list[tuple[str, str]] | None = None,
+    cuda_venv_python: Path | None = None,
 ) -> None:
-    """Build desktop app as a directory (uses app.spec directly).
-
-    Args:
-        bundled_model_dirs: Optional model datas to inject into app.spec.
-    """
-    uv = _find_cmd("uv")
-    if uv is None:
-        _error("uv not found.")
-
+    """Build desktop app as a directory (uses app.spec directly)."""
     spec = PROJECT_ROOT / "app.spec"
     if not spec.exists():
         _error(
@@ -145,13 +173,21 @@ def _build_onedir(
         _info(f"Bundling {len(bundled_model_dirs)} model(s) into onedir build")
         spec = _inject_model_datas(spec, bundled_model_dirs)
 
-    cmd = [uv, "run", "--", "pyinstaller", "--clean", "--noconfirm", str(spec)]
+    # For CUDA builds, use the isolated CUDA venv.
+    # For normal builds, use the project .venv.
+    if cuda_venv_python is not None:
+        py = cuda_venv_python
+    else:
+        _ensure_pyinstaller_in_venv()
+        py = _venv_python()
+
+    cmd = [str(py), "-m", "PyInstaller", "--clean", "--noconfirm", str(spec)]
     _info(f"Running: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
 
     # Clean up temp spec if generated.
-    if bundled_model_dirs and spec.name.startswith("_build_"):
+    if spec.name.startswith("_build_"):
         spec.unlink(missing_ok=True)
 
     if result.returncode != 0:
@@ -187,23 +223,122 @@ def _inject_model_datas(
     return tmp_spec
 
 
-# ========== desktop: onefile ==========
+# ========== CUDA support ==========
 
-def _build_onefile() -> None:
-    """Build desktop app as a single executable.
+# sherpa-onnx CUDA wheel configuration
+# Reference: https://k2-fsa.github.io/sherpa/onnx/cuda.html
+# Available variants:
+#   "cuda"          -> CUDA 11.8
+#   "cuda12.cudnn9" -> CUDA 12.8 + cuDNN 9
+_SHERPA_CUDA_VERSION = "1.12.38"
+_SHERPA_CUDA_INDEX_URL = "https://k2-fsa.github.io/sherpa/onnx/cuda.html"
+_CUDA_BUILD_VENV = PROJECT_ROOT / "_cuda_build_venv"
 
-    Generates a temporary onefile spec based on app.spec config,
-    then runs PyInstaller. The temp spec is deleted after build.
+
+def _setup_cuda_env(cuda_variant: str = "cuda") -> Path:
+    """Create an isolated temporary venv with the CUDA variant of sherpa-onnx.
+
+    This keeps the project's .venv untouched so dev mode is not affected.
+    The temp venv is deleted after the build.
+
+    Returns:
+        Path to the temp venv's Python executable.
     """
     uv = _find_cmd("uv")
     if uv is None:
         _error("uv not found.")
 
+    venv_dir = _CUDA_BUILD_VENV
+    if sys.platform == "win32":
+        venv_python = venv_dir / "Scripts" / "python.exe"
+    else:
+        venv_python = venv_dir / "bin" / "python"
+
+    # Clean up any previous temp venv.
+    if venv_dir.exists():
+        shutil.rmtree(venv_dir)
+
+    # 1. Create temp venv.
+    _info("Creating isolated CUDA build environment...")
+    subprocess.run([uv, "venv", str(venv_dir)], check=True)
+
+    # 2. Install project dependencies.
+    _info("Installing project dependencies into CUDA venv...")
+    subprocess.run(
+        [uv, "pip", "install", "--python", str(venv_python), str(PROJECT_ROOT)],
+        check=True,
+    )
+
+    # 3. Uninstall CPU-only sherpa-onnx-bin.
+    _info("Removing CPU-only sherpa-onnx-bin...")
+    subprocess.run(
+        [uv, "pip", "uninstall", "--python", str(venv_python), "-y", "sherpa-onnx-bin"],
+        capture_output=True,
+    )
+
+    # 4. Install CUDA variant from official wheel index.
+    version_spec = f"{_SHERPA_CUDA_VERSION}+{cuda_variant}"
+    _info(f"Installing sherpa-onnx=={version_spec} ...")
+    _info(f"  Index: {_SHERPA_CUDA_INDEX_URL}")
+    result = subprocess.run(
+        [uv, "pip", "install", "--python", str(venv_python),
+         f"sherpa-onnx=={version_spec}",
+         "--no-index", "-f", _SHERPA_CUDA_INDEX_URL],
+    )
+    if result.returncode != 0:
+        _error(
+            f"Failed to install sherpa-onnx {version_spec}.\n"
+            "  Check available versions at: https://k2-fsa.github.io/sherpa/onnx/cuda.html\n"
+            "  Ensure your NVIDIA GPU and CUDA toolkit meet the requirements."
+        )
+
+    # 5. Install PyInstaller.
+    _info("Installing PyInstaller into CUDA venv...")
+    subprocess.run(
+        [uv, "pip", "install", "--python", str(venv_python), "pyinstaller>=6.19.0"],
+        check=True,
+    )
+
+    # Verify.
+    result = subprocess.run(
+        [str(venv_python), "-c",
+         "import sherpa_onnx; print(sherpa_onnx.__version__)"],
+        capture_output=True, text=True,
+    )
+    installed_version = result.stdout.strip()
+    _info(f"  sherpa-onnx {installed_version} in CUDA venv")
+
+    return venv_python
+
+
+def _cleanup_cuda_venv() -> None:
+    """Remove the temporary CUDA build venv."""
+    if _CUDA_BUILD_VENV.exists():
+        shutil.rmtree(_CUDA_BUILD_VENV)
+        _info("Cleaned up temporary CUDA build environment")
+
+
+# ========== desktop: onefile ==========
+
+def _build_onefile(
+    cuda_venv_python: Path | None = None,
+) -> None:
+    """Build desktop app as a single executable.
+
+    Generates a temporary onefile spec based on app.spec config,
+    then runs PyInstaller. The temp spec is deleted after build.
+    """
+    if cuda_venv_python is not None:
+        py = cuda_venv_python
+    else:
+        _ensure_pyinstaller_in_venv()
+        py = _venv_python()
+
     spec_content = _generate_onefile_spec()
     tmp_spec = PROJECT_ROOT / "_build_onefile.spec"
     tmp_spec.write_text(spec_content, encoding="utf-8")
 
-    cmd = [uv, "run", "--", "pyinstaller", "--clean", "--noconfirm", str(tmp_spec)]
+    cmd = [str(py), "-m", "PyInstaller", "--clean", "--noconfirm", str(tmp_spec)]
     _info(f"Running: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
@@ -276,6 +411,13 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
+# Collect sherpa-onnx DLLs (CUDA provider DLLs are loaded dynamically
+# by onnxruntime at runtime and PyInstaller cannot detect them).
+a.binaries += [
+    (f.name, str(f), "BINARY")
+    for f in _pathlib.Path(__import__("sherpa_onnx").__file__).parent.joinpath("lib").glob("*.dll")
+]
 
 # Exclude unused GUI frameworks to reduce size
 if sys.platform == "win32":
@@ -425,6 +567,8 @@ examples:
     uv run build.py                                    Desktop build (onedir)
     uv run build.py --onefile                          Desktop build (single exe)
     uv run build.py --with-models model-a,model-b      Bundle models with onedir
+    uv run build.py --cuda                             CUDA GPU build (CUDA 11.8)
+    uv run build.py --cuda --cuda-variant cuda12.cudnn9  CUDA 12.8 + cuDNN 9
     uv run build.py --android                          Android APK (macOS / Linux)
     uv run build.py --clean                            Remove build artifacts
 
@@ -445,6 +589,11 @@ configuration:
                         help="Comma-separated model IDs to bundle (onedir only)")
     parser.add_argument("--cuda", action="store_true",
                         help="Build with CUDA GPU support (NVIDIA only, Windows)")
+    parser.add_argument("--cuda-variant", type=str, default="cuda",
+                        choices=["cuda", "cuda12.cudnn9"],
+                        metavar="VARIANT",
+                        help="CUDA variant: 'cuda' (CUDA 11.8, default) or "
+                             "'cuda12.cudnn9' (CUDA 12.8 + cuDNN 9)")
     args = parser.parse_args()
 
     if args.clean:
@@ -469,7 +618,7 @@ configuration:
         model_ids = [m.strip() for m in args.with_models.split(",")]
         bundled_model_dirs = _download_build_models(model_ids)
 
-    _build_desktop(onefile=args.onefile, bundled_model_dirs=bundled_model_dirs, cuda=args.cuda)
+    _build_desktop(onefile=args.onefile, bundled_model_dirs=bundled_model_dirs, cuda=args.cuda, cuda_variant=args.cuda_variant)
 
 
 # ========== frontend build ==========
@@ -505,16 +654,21 @@ def _build_desktop(
     onefile: bool = False,
     bundled_model_dirs: list[tuple[str, str]] | None = None,
     cuda: bool = False,
+    cuda_variant: str = "cuda",
 ) -> None:
+    cuda_venv_python = None
     if cuda:
         _info("=== CUDA GPU build (NVIDIA) ===")
-        _info("Note: This build requires the sherpa-onnx +cuda wheel variant.")
-        _info("      The resulting app will be larger (~200MB+ vs ~50MB CPU-only).")
-        _info("      Users must have an NVIDIA GPU with CUDA Toolkit installed.")
-    if onefile:
-        _build_onefile()
-    else:
-        _build_onedir(bundled_model_dirs=bundled_model_dirs)
+        cuda_venv_python = _setup_cuda_env(cuda_variant)
+    try:
+        if onefile:
+            _build_onefile(cuda_venv_python=cuda_venv_python)
+        else:
+            _build_onedir(bundled_model_dirs=bundled_model_dirs, cuda_venv_python=cuda_venv_python)
+    finally:
+        if cuda_venv_python is not None:
+            _info(f"CUDA build venv kept at: {_CUDA_BUILD_VENV}")
+            _info(f"(delete manually with: rmdir /s /q {_CUDA_BUILD_VENV})")
 
 
 # ========== model bundling ==========

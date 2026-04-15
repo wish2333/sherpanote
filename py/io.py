@@ -242,6 +242,25 @@ def sanitize_filename(name: str) -> str:
     return name.strip(". ")
 
 
+def convert_to_mono_16k_wav(input_path: str, output_path: str) -> str:
+    """Convert any supported audio file to a 16kHz mono WAV file.
+
+    Returns the path to the converted file.
+    """
+    samples, _ = read_audio_as_mono_16k(input_path)
+
+    # Convert float32 [-1, 1] to int16 PCM.
+    int16_data = float32_to_int16(samples)
+
+    with wave.open(output_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit
+        wf.setframerate(16000)
+        wf.writeframes(int16_data.tobytes())
+
+    return output_path
+
+
 # ---- internal helpers ----
 
 

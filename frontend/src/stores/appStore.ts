@@ -77,6 +77,7 @@ export const useAppStore = defineStore("app", () => {
     offline_use_vad: true,
     vad_padding: 0.8,
     active_vad_model: "auto",
+    active_whisper_model: "",
   });
 
   /* ---- toast notifications ---- */

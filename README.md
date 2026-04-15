@@ -14,6 +14,8 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Real-time streaming transcription** with live partial results (Zipformer/Paraformer online models)
 - **Offline audio file transcription** with VAD-based segmentation and progress tracking
 - **Simulated streaming** - VAD + offline model pipeline enabling real-time display for offline-only models (SenseVoice, Qwen3-ASR, Cohere Transcribe)
+- **GPU acceleration** - automatic NVIDIA CUDA detection, significantly speeds up transcription for large models (Qwen3-ASR, Whisper)
+- **Whisper.cpp integration** - optional ASR backend with broader model support and hardware compatibility
 - **Multi-language support** - 14 languages including Chinese, English, Japanese, Korean, Cantonese, and more
 - **10+ ASR models** from multiple providers (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
 - **Automatic model type detection** - streaming/offline/simulated-streaming classification based on file heuristics, supporting user-downloaded models
@@ -74,6 +76,7 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 ### Build & Deployment
 - **PyInstaller**: Desktop application packaging (onedir/onefile)
 - **Cross-platform**: Single codebase for Windows and macOS
+- **CUDA builds**: Optional GPU-accelerated builds with `--cuda` flag
 - **bun**: Frontend package management
 
 ## Quick Start
@@ -117,6 +120,10 @@ uv run build.py --onefile
 
 # Build with bundled ASR models (directory mode only)
 uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
+
+# Build with CUDA GPU acceleration (NVIDIA, requires CUDA toolkit + cuDNN)
+uv run build.py --cuda
+uv run build.py --cuda --cuda-variant cuda12.cudnn9  # CUDA 12.x + cuDNN 9
 
 # Clean build artifacts
 uv run build.py --clean
@@ -187,6 +194,9 @@ sherpanote/
 │   ├── model_registry.py      # Model catalog (10+ models)
 │   ├── presets.py             # AI API preset management
 │   ├── processing_presets.py  # AI processing template management
+│   ├── gpu_detect.py          # NVIDIA CUDA detection and verification
+│   ├── whispercpp.py          # Whisper.cpp ASR backend integration
+│   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
 ├── pywebvue/           # PyWebVue framework core
 ├── main.py             # Application entry point + Bridge API
@@ -205,6 +215,18 @@ SherpaNote uses a persistent configuration system stored in SQLite. Key configur
 - **Model Management**: Download source, proxy settings, model directory
 
 Configuration can be modified through the **Settings** interface.
+
+## Changelog
+
+See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
+
+### [Unreleased]
+
+- GPU acceleration with CUDA build support
+- Whisper.cpp integration as optional ASR backend
+- Real-time transcription progress with segment counts
+- Video download for transcription
+- Audio format optimization (WAV to MP3)
 
 ## Contributing
 

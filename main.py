@@ -13,18 +13,19 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pywebvue import App, Bridge, expose
 from py.config import AppConfig, AiConfig, AsrConfig, ConfigStore, _DEFAULT_MODELS_DIR
 from py.storage import Storage
 from py.asr import SherpaASR
 from py.llm import AIProcessor
-from py.io import ensure_data_dir
+from py.io import ensure_data_dir, convert_to_mono_16k_wav
 from py.presets import AiPresetStore
 from py.processing_presets import ProcessingPresetStore
 from py import model_manager as _mm
 from py import model_registry as _mr
+from py.video_downloader import VideoDownloadConfig, download_audio
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ class SherpaNoteAPI(Bridge):
         # Track how many final segments have been emitted to the frontend
         # during the current streaming session (used for both true and simulated streaming).
         self._last_emitted_final_count: int = 0
+        # Audio file display-name metadata (filename -> display_name).
+        self._audio_meta: dict[str, str] = self._load_audio_meta()
 
     def dispatch_task(self, command: str, args: Any) -> Any:
         """Dispatch commands for run_on_main_thread.
@@ -158,17 +161,34 @@ class SherpaNoteAPI(Bridge):
 
     @expose
     def detect_gpu(self) -> dict:
-        """Detect NVIDIA GPU and CUDA availability for sherpa-onnx."""
-        from py.gpu_detect import detect_gpu
+        """Detect NVIDIA GPU and CUDA availability for sherpa-onnx.
 
-        status = detect_gpu()
-        return {"success": True, "data": {
-            "available": status.available,
-            "gpu_name": status.gpu_name,
-            "cuda_version": status.cuda_version,
-            "reason": status.reason,
-            "onnx_provider": status.onnx_provider,
-        }}
+        Runs detection in a background thread to avoid blocking the UI.
+        Result is emitted via 'gpu_detect_complete' event.
+        """
+        def _work() -> None:
+            try:
+                from py.gpu_detect import detect_gpu
+                status = detect_gpu()
+                self._emit("gpu_detect_complete", {
+                    "available": status.available,
+                    "gpu_name": status.gpu_name,
+                    "cuda_version": status.cuda_version,
+                    "reason": status.reason,
+                    "onnx_provider": status.onnx_provider,
+                })
+            except Exception as exc:
+                logger.error("GPU detection failed: %s", exc)
+                self._emit("gpu_detect_complete", {
+                    "available": False,
+                    "gpu_name": "",
+                    "cuda_version": "",
+                    "reason": str(exc),
+                    "onnx_provider": "cpu",
+                })
+
+        threading.Thread(target=_work, daemon=True).start()
+        return {"success": True, "data": {"status": "detecting"}}
 
     @expose
     def init_model(self, language: str | None = None) -> dict:
@@ -764,8 +784,34 @@ class SherpaNoteAPI(Bridge):
 
     # ---- Import & Transcribe ----
 
-    def _copy_file_to_audio_dir(self, src_path: str) -> str:
+    def _audio_meta_path(self) -> Path:
+        """Path to the audio display-name metadata JSON file."""
+        return Path(self._config.data_dir) / "audio_meta.json"
+
+    def _load_audio_meta(self) -> dict[str, str]:
+        """Load audio metadata mapping from disk."""
+        try:
+            import json
+            text = self._audio_meta_path().read_text(encoding="utf-8")
+            return json.loads(text)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_audio_meta(self) -> None:
+        """Persist audio metadata mapping to disk."""
+        import json
+        self._audio_meta_path().write_text(
+            json.dumps(self._audio_meta, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _copy_file_to_audio_dir(self, src_path: str, display_name: str | None = None) -> str:
         """Copy a file into data/audio/ with a safe timestamped filename.
+
+        Args:
+            src_path: Source file path.
+            display_name: Human-readable name to show in the audio manager
+                (e.g. video title or original filename).
 
         Returns the destination path as a string.
         Appends a numeric suffix if a file with the same name exists.
@@ -787,10 +833,16 @@ class SherpaNoteAPI(Bridge):
 
         shutil.copy2(str(src), str(dest))
         logger.info("Copied %s -> %s", src_path, dest)
+
+        # Save display name metadata so the audio manager can show it.
+        if display_name:
+            self._audio_meta[dest.name] = display_name
+            self._save_audio_meta()
+
         return str(dest)
 
     @expose
-    def import_and_transcribe(self, file_path: str) -> dict:
+    def import_and_transcribe(self, file_path: str, title: str | None = None) -> dict:
         """Copy an audio file into data/audio/, then transcribe it.
 
         Unlike transcribe_file, this manages the audio file inside the
@@ -809,14 +861,22 @@ class SherpaNoteAPI(Bridge):
         if src.suffix.lower() not in audio_exts:
             return {"success": False, "error": f"Unsupported audio format: {src.suffix}"}
 
-        # Copy file into managed directory.
-        try:
-            dest_path = self._copy_file_to_audio_dir(file_path)
-        except Exception as exc:
-            logger.error("Failed to copy file: %s", exc, exc_info=True)
-            return {"success": False, "error": f"Failed to copy file: {exc}"}
+        if title is None:
+            title = src.stem
 
-        title = src.stem
+        # If the file is already in the managed audio directory, use it directly.
+        # Otherwise, copy it into the managed directory.
+        audio_dir = Path(self._config.data_dir) / "audio"
+        resolved_src = src.resolve()
+        resolved_audio_dir = audio_dir.resolve()
+        if str(resolved_src).startswith(str(resolved_audio_dir)):
+            dest_path = file_path
+        else:
+            try:
+                dest_path = self._copy_file_to_audio_dir(file_path, display_name=title)
+            except Exception as exc:
+                logger.error("Failed to copy file: %s", exc, exc_info=True)
+                return {"success": False, "error": f"Failed to copy file: {exc}"}
 
         use_whisper = self._config.asr.asr_backend == "whisper-cpp"
         if use_whisper and self._get_whisper_asr() is None:
@@ -831,48 +891,119 @@ class SherpaNoteAPI(Bridge):
             self._emit("transcribe_progress", payload)
 
         def _work(dest: str, rec_title: str) -> None:
-            try:
-                if use_whisper:
-                    whisper = self._get_whisper_asr()
-                    if whisper is None:
-                        raise RuntimeError("whisper.cpp ASR not available")
-                    logger.info("import_and_transcribe: transcribing with whisper.cpp: %s", dest)
-                    segments = whisper.transcribe_file(dest, on_progress=on_progress)
-                else:
-                    if self._asr is None:
-                        raise RuntimeError("sherpa-onnx ASR not initialized")
-                    if self._asr._offline_recognizer is None:
-                        self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
-                    logger.info("import_and_transcribe: transcribing %s", dest)
-                    segments = self._asr.transcribe_file(dest, on_progress=on_progress)
-                full_text = " ".join(s["text"] for s in segments)
-                full_text = self._apply_punctuation(full_text)
-                logger.info("import_and_transcribe: saving record")
-                record = self._storage.save({
-                    "title": rec_title,
-                    "transcript": full_text,
-                    "segments": segments,
-                    "audio_path": dest,
-                    "duration_seconds": 0,
-                })
-                record = self._annotate_record(record)
-
-                # Auto AI processing after transcription.
-                if self._config.auto_ai_modes and self._config.ai.api_key:
-                    record = self._auto_process_record(record)
-
-                self._emit("import_transcribe_complete", {
-                    "record_id": record["id"],
-                    "record": record,
-                    "audio_path": dest,
-                })
-                logger.info("import_and_transcribe: complete, record_id=%s", record["id"])
-            except Exception as exc:
-                logger.error("import_and_transcribe: failed: %s", exc, exc_info=True)
-                self._emit("transcribe_error", {"error": f"Transcription failed: {exc}"})
+            self._transcribe_and_save_record(dest, rec_title, on_progress)
 
         threading.Thread(target=_work, args=(dest_path, title), daemon=True).start()
         return {"success": True, "data": {"status": "importing", "audio_path": dest_path}}
+
+    def _transcribe_and_save_record(self, audio_path: str, title: str, on_progress: Callable) -> None:
+        """Internal helper to transcribe an audio file and save it as a record.
+
+        This method is intended to be run in a background thread.
+        """
+        from py.io import get_audio_metadata
+
+        try:
+            use_whisper = self._config.asr.asr_backend == "whisper-cpp"
+            if use_whisper:
+                whisper = self._get_whisper_asr()
+                if whisper is None:
+                    raise RuntimeError("whisper.cpp ASR not available")
+                logger.info("Transcribing with whisper.cpp: %s", audio_path)
+                segments = whisper.transcribe_file(audio_path, on_progress=on_progress)
+            else:
+                if self._asr is None:
+                    raise RuntimeError("sherpa-onnx ASR not initialized")
+                if self._asr._offline_recognizer is None:
+                    self.run_on_main_thread("create_offline_recognizer", timeout=60.0)
+                logger.info("Transcribing with sherpa-onnx: %s", audio_path)
+                segments = self._asr.transcribe_file(audio_path, on_progress=on_progress)
+            
+            full_text = " ".join(s["text"] for s in segments)
+            full_text = self._apply_punctuation(full_text)
+            logger.info("Saving record for %s", title)
+            # Calculate actual duration from audio metadata.
+            meta = get_audio_metadata(audio_path)
+            duration_seconds = meta.get("duration", 0) or 0
+            record = self._storage.save({
+                "title": title,
+                "transcript": full_text,
+                "segments": segments,
+                "audio_path": audio_path,
+                "duration_seconds": duration_seconds,
+            })
+            record = self._annotate_record(record)
+            
+            # Auto AI processing after transcription.
+            if self._config.auto_ai_modes and self._config.ai.api_key:
+                record = self._auto_process_record(record)
+            
+            self._emit("import_transcribe_complete", {
+                "record_id": record["id"],
+                "record": record,
+                "audio_path": audio_path,
+            })
+            logger.info("Transcription and save complete, record_id=%s", record["id"])
+        except Exception as exc:
+            logger.error("Transcription failed: %s", exc, exc_info=True)
+            self._emit("transcribe_error", {"error": f"Transcription failed: {exc}"})
+
+    @expose
+    def download_and_transcribe(self, url: str) -> dict:
+        """Download audio from a URL and then transcribe it.
+
+        Progress is emitted via 'download_progress' and 'transcribe_progress'.
+        Completion is reported via 'import_transcribe_complete'.
+        """
+        logger.info("download_and_transcribe called for URL: %s", url)
+
+        # 1. Setup download config
+        # Use data/temp for initial download
+        temp_dir = str(Path(self._config.data_dir) / "temp")
+        config = VideoDownloadConfig(
+            output_dir=temp_dir,
+            proxy=self._config.asr.proxy_url if self._config.asr.proxy_mode == "manual" else ""
+        )
+
+        def on_download_progress(progress: float) -> None:
+            self._emit("download_progress", {"percent": int(progress * 100)})
+
+        def _work(downloaded_path: str, title: str) -> None:
+            try:
+                # 2. Move to managed audio directory (save video title as display name)
+                dest_path = self._copy_file_to_audio_dir(downloaded_path, display_name=title)
+
+                # 3. Transcribe and save
+                def on_transcribe_progress(percent: int, info: dict | None = None) -> None:
+                    payload: dict = {"percent": percent}
+                    if info:
+                        payload["segments"] = info
+                    self._emit("transcribe_progress", payload)
+
+                self._transcribe_and_save_record(dest_path, title, on_transcribe_progress)
+
+            except Exception as exc:
+                logger.error("download_and_transcribe failed: %s", exc, exc_info=True)
+                self._emit("transcribe_error", {"error": f"Download/Transcription failed: {exc}"})
+
+        # Pre-initialize ASR (same as import_and_transcribe).
+        use_whisper = self._config.asr.asr_backend == "whisper-cpp"
+        if use_whisper and self._get_whisper_asr() is None:
+            return {"success": False, "error": "whisper.cpp backend not configured. Please install binary and model."}
+        if not use_whisper and self._asr is None:
+            self._asr = SherpaASR(self._make_asr_config())
+
+        def _download_then_work() -> None:
+            try:
+                logger.info("Starting download for URL: %s", url)
+                downloaded_path, title = download_audio(url, config, on_download_progress)
+                _work(downloaded_path, title)
+            except Exception as exc:
+                logger.error("download_and_transcribe failed: %s", exc, exc_info=True)
+                self._emit("transcribe_error", {"error": f"Download/Transcription failed: {exc}"})
+
+        threading.Thread(target=_download_then_work, daemon=True).start()
+        return {"success": True, "data": {"status": "downloading"}}
 
     # ---- Model Management ----
 
@@ -1220,6 +1351,7 @@ class SherpaNoteAPI(Bridge):
             files.append({
                 "file_path": str(entry),
                 "file_name": entry.name,
+                "display_name": self._audio_meta.get(entry.name, ""),
                 "size_mb": round(size_mb, 2),
                 "linked_records": linked,
             })
@@ -1237,6 +1369,9 @@ class SherpaNoteAPI(Bridge):
             return {"success": False, "error": f"File not found: {file_path}"}
         try:
             p.unlink()
+            # Clean up display-name metadata.
+            self._audio_meta.pop(p.name, None)
+            self._save_audio_meta()
             # Clear audio_path from records that reference this file.
             # Must pass the full record data to avoid overwriting other fields.
             normalized = str(p)
@@ -1423,6 +1558,15 @@ if __name__ == "__main__":
                 except Exception as exc:
                     logger.warning("Failed to auto-save version for %s: %s", rid, exc)
             api._storage.close()
+            
+            # Cleanup temporary files
+            try:
+                temp_dir = Path(api._config.data_dir) / "temp"
+                if temp_dir.exists() and temp_dir.is_dir():
+                    shutil.rmtree(temp_dir)
+                    logger.info("Cleaned up temporary directory: %s", temp_dir)
+            except Exception as e:
+                logger.warning("Failed to cleanup temporary directory: %s", e)
 
         import atexit
         atexit.register(_shutdown_cleanup)

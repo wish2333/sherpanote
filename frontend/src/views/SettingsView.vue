@@ -12,7 +12,6 @@ import { useAppStore } from "../stores/appStore";
 import {
   call,
   onEvent,
-  detectGpu,
   getWhisperBinaryStatus,
   installWhisperBinary,
   uninstallWhisperBinary,
@@ -593,16 +592,23 @@ const offInstallError = onEvent<{ error: string }>("model_install_error", (detai
   store.showToast(detail.error ?? "Model installation failed", "error");
 });
 
+const offGpuDetect = onEvent<{
+  available: boolean;
+  gpu_name: string;
+  cuda_version: string;
+  reason: string;
+  onnx_provider: string;
+}>("gpu_detect_complete", (detail) => {
+  gpuStatus.value = detail;
+});
+
 onMounted(async () => {
   await loadConfig();
   await loadModels();
   await loadPresets();
   await loadProcessingPresets();
-  // Detect GPU status
-  const gpuRes = await detectGpu();
-  if (gpuRes.success && gpuRes.data) {
-    gpuStatus.value = gpuRes.data;
-  }
+  // Trigger GPU detection (non-blocking, result arrives via event)
+  call("detect_gpu");
   // Check whisper.cpp status
   const whisperRes = await getWhisperBinaryStatus();
   if (whisperRes.success && whisperRes.data) {
@@ -614,6 +620,7 @@ onUnmounted(() => {
   offDownloadProgress();
   offInstallComplete();
   offInstallError();
+  offGpuDetect();
 });
 </script>
 

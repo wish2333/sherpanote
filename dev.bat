@@ -17,5 +17,6 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+uv sync
 uv run dev.py %*
 pause

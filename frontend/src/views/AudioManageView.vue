@@ -14,6 +14,7 @@ import { useAppStore } from "../stores/appStore";
 interface AudioFileInfo {
   file_path: string;
   file_name: string;
+  display_name: string;
   size_mb: number;
   linked_records: { id: string; title: string }[];
 }
@@ -185,8 +186,13 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between">
             <div class="min-w-0 flex-1">
               <h3 class="text-base font-medium truncate">
-                {{ file.file_name }}
+                {{ file.display_name || file.file_name }}
               </h3>
+              <p
+                v-if="file.display_name"
+                class="text-xs text-base-content/40 truncate mt-0.5"
+                :title="file.file_name"
+              >{{ file.file_name }}</p>
               <div class="mt-1 flex items-center gap-3 text-sm text-base-content/60">
                 <span>{{ formatSize(file.size_mb) }}</span>
                 <span v-if="formatDate(file.file_path)" class="text-base-content/40">

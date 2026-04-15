@@ -12,8 +12,8 @@
 | 产品定位 | 面向学生、研究者、职场人士的本地优先 AI 语音学习助手 |
 | 核心价值 | 隐私安全（本地ASR）、跨平台（Win/Mac）、从音频到结构化知识的一站式工作流 |
 | 技术栈 | PyWebVue (Vue 3 + pywebview) + DaisyUI 5 + Tailwind CSS 4 + sherpa-onnx + SQLite + OpenAI API |
-| 开发周期 | 2026-04-06 ~ 2026-04-11（6天核心开发） |
-| 代码规模 | ~10,350 行（前端 + 后端），16 个 commits，41 个文件变更 |
+| 开发周期 | 2026-04-06 ~ 2026-04-15（3天核心开发 + 持续迭代） |
+| 代码规模 | ~12,000+ 行（前端 + 后端），持续迭代中 |
 | 角色定位 | 独立负责产品设计、架构设计、全栈开发 |
 
 ---
@@ -169,6 +169,35 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 - 实测发现 ONNX-Whisper 模型质量不佳 -> 从模型管理器移除，保留执行代码供用户自行下载
 - 减少切换录音/转录界面时的冗余 DEBUG 日志
 
+### Phase 6：GPU 加速、Whisper.cpp 集成与转录体验升级（2026-04-13 ~ 04-15）
+
+**核心新增**：
+
+1. **GPU 加速支持**
+   - `py/gpu_detect.py`：自动检测 NVIDIA GPU、CUDA 版本、验证 sherpa-onnx CUDA 构建版本
+   - `build.py` CUDA 构建流程：隔离 `_cuda_build_venv` 避免影响开发环境，支持 `--cuda` 和 `--cuda-variant`（CUDA 11.8 / CUDA 12+cuDNN 9）两种变体
+   - 设置界面 GPU 开关：实时显示 GPU 名称、CUDA 版本，不可用时显示原因
+   - ASR 引擎通过 `provider="cuda"` 参数启用 CUDA 加速，经 nvidia-smi 验证 GPU 确实参与计算
+
+2. **Whisper.cpp 集成**
+   - `py/whispercpp.py`：可选的 ASR 后端，通过 whisper-cli.exe 进行转录
+   - `py/whispercpp_registry.py`：Whisper.cpp 模型注册表，支持 cpu/blas/cuda 变体
+   - 二进制分发管理：下载、安装、依赖文件（libggml 等）自动提取
+   - 录音/转录界面支持引擎动态切换，模型选择器自动过滤
+
+3. **转录体验升级**
+   - 进度条实时显示段落数量（如"42% (15/30)"）
+   - 音频元数据管理：支持显示视频标题或原文件名
+   - 智能文件检测：导入音频时自动避免重复复制
+   - 音频格式优化：WAV 转 MP3，文件大小减少 90% 以上
+
+**解决的工程问题**：
+- `uv run` 会重新同步 `.venv` 导致 CUDA 包被替换 -> 创建隔离的临时 venv 用于 CUDA 构建
+- PyInstaller 无法自动收集 `onnxruntime_providers_cuda.dll` -> 在 app.spec 中手动收集 sherpa-onnx lib/ 下的所有 DLL
+- `import onnxruntime` 失败（sherpa-onnx 内部捆绑）-> 改为检查 `sherpa_onnx.__version__` 中的 `+cuda` 后缀
+- Whisper.exe 已弃用 -> 切换到 whisper-cli.exe
+- Whisper.cpp 模型下载临时文件扩展名兼容性 -> 统一处理
+
 ---
 
 ## 三、关键架构决策
@@ -182,6 +211,7 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 | 前后端通信 | @expose + _emit 事件驱动 | PyWebVue 原生机制，无需 WebSocket |
 | 模型检测 | 文件启发式规则 | 支持任意模型，不限于预设目录名 |
 | 模拟流式 | VAD + OfflineRecognizer | 用离线模型实现类流式体验，扩展可用模型范围 |
+| GPU 构建 | 隔离临时 venv | 避免 CUDA 包污染开发环境，保持 dev/build 分离 |
 | 版本控制 | 内容差异脏检测 | 避免无修改也创建版本，减少版本噪音 |
 
 ---
@@ -190,7 +220,9 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 
 1. **模型生态整合能力**：对接 5 种下载源、10+ ASR 模型、多种模型架构（Transducer/Paraformer/SenseVoice/Whisper/Qwen3-ASR/FunASR Nano/Cohere Transcribe），基于文件启发式自动分类
 2. **模拟流式架构创新**：VAD + OfflineRecognizer 管线，让离线模型也能提供实时转录体验
-3. **跨平台音频处理**：macOS AudioContext 兼容（重采样、suspended 重试、静音检测）
-4. **多供应商 AI 集成**：OpenAI-compatible + OpenRouter，预设管理，流式输出，截断恢复
-5. **端到端数据安全**：ASR 全程本地运行，SQLite WAL 持久化，版本历史可追溯
-6. **快速迭代能力**：6 天从 PRD 到可用产品，16 个 commits，7400+ 行新增代码
+3. **GPU 加速构建体系**：隔离临时 venv 避免 CUDA 包污染开发环境，支持 CUDA 11.8 和 12.x 两种变体，自动检测 GPU 并验证 sherpa-onnx CUDA 构建
+4. **Whisper.cpp 双引擎架构**：sherpa-onnx + whisper.cpp 双 ASR 后端，用户可按需切换，模型选择器自动过滤
+5. **跨平台音频处理**：macOS AudioContext 兼容（重采样、suspended 重试、静音检测）
+6. **多供应商 AI 集成**：OpenAI-compatible + OpenRouter，预设管理，流式输出，截断恢复
+7. **端到端数据安全**：ASR 全程本地运行，SQLite WAL 持久化，版本历史可追溯
+8. **快速迭代能力**：3 天从 PRD 到可用产品，持续迭代至 v1.3.0

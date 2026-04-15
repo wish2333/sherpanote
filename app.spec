@@ -106,6 +106,18 @@ a = Analysis(
     noarchive=False,
 )
 
+# sherpa-onnx bundles CUDA provider DLLs in its lib/ directory.
+# These are loaded dynamically by onnxruntime at runtime, so
+# PyInstaller cannot detect them automatically. Force collection.
+# Target: sherpa_onnx/lib so they sit next to onnxruntime.dll.
+import sherpa_onnx as _so  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+_lib = _Path(_so.__file__).parent.joinpath("lib")
+_dlls = list(_lib.glob("*.dll"))
+print(f"[DEBUG] sherpa_onnx lib={_lib}, DLLs={[f.name for f in _dlls]}")
+for _f in _dlls:
+    a.binaries.append((str(_Path("sherpa_onnx") / "lib" / _f.name), str(_f), "BINARY"))
+
 if sys.platform == "win32":
     a.excludes += EXCLUDES_WIN32
 elif sys.platform == "linux":

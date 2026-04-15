@@ -10,9 +10,15 @@ import logging
 import platform
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Windows: prevent subprocess calls from flashing a console window.
+_SUBPROCESS_FLAGS = 0
+if sys.platform == "win32":
+    _SUBPROCESS_FLAGS = 0x08000000  # CREATE_NO_WINDOW
 
 
 @dataclass(frozen=True)
@@ -92,6 +98,7 @@ def _detect_nvidia_gpu() -> str:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_SUBPROCESS_FLAGS,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip().split("\n")[0].strip()
@@ -108,6 +115,7 @@ def _detect_cuda_version() -> str:
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=_SUBPROCESS_FLAGS,
         )
         if result.returncode == 0:
             match = re.search(r"CUDA Version:\s*(\S+)", result.stdout)
@@ -121,31 +129,21 @@ def _detect_cuda_version() -> str:
 def _verify_sherpa_cuda() -> bool:
     """Verify that sherpa-onnx was built with CUDA support.
 
-    Checks if onnxruntime has the CUDA execution provider registered.
+    The CUDA variant of sherpa-onnx has a version string containing
+    '+cuda' (e.g. '1.12.38+cuda'). We check this instead of importing
+    onnxruntime directly, because sherpa-onnx bundles onnxruntime
+    internally and does not expose it as a separate Python package.
     """
     try:
         import sherpa_onnx  # type: ignore[import-untyped]
-
-        # sherpa-onnx with CUDA support exposes the cuda provider.
-        # Try to detect via the available providers in onnxruntime.
-        try:
-            import onnxruntime  # type: ignore[import-untyped]
-
-            providers = onnxruntime.get_available_providers()
-            if "CUDAExecutionProvider" in providers:
-                return True
-            logger.info("Available ONNX Runtime providers: %s", providers)
-            return False
-        except ImportError:
-            # onnxruntime not directly importable (bundled by sherpa-onnx).
-            # Fall back to a heuristic: try creating a recognizer with cuda.
-            pass
-
-        # Fallback: check if sherpa-onnx binary includes CUDA symbols.
-        # This is less reliable but covers the case where onnxruntime is
-        # not directly importable.
-        logger.info("Cannot verify CUDA provider directly, assuming CPU-only build")
-        return False
     except ImportError:
         logger.info("sherpa_onnx not importable for CUDA verification")
         return False
+
+    version = getattr(sherpa_onnx, "__version__", "")
+    is_cuda = "+cuda" in version
+    if is_cuda:
+        logger.info("sherpa-onnx CUDA build detected: %s", version)
+    else:
+        logger.info("sherpa-onnx is CPU-only build: %s", version)
+    return is_cuda

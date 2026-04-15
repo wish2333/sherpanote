@@ -14,6 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from py.io import convert_to_mono_16k_wav
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,27 @@ class WhisperCppASR:
                 "Please install it from Settings."
             )
 
+        # Whisper.cpp requires 16kHz mono WAV.
+        # If the input file is not already in this format, convert it.
+        # We save the temporary converted file to data/temp.
+        from py.config import _DEFAULT_DATA_DIR
+        temp_dir = Path(_DEFAULT_DATA_DIR) / "temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check if conversion is needed.
+        # For simplicity, we always convert if it's not a .wav or if we want to be sure.
+        # A better check would be using get_audio_metadata.
+        from py.io import get_audio_metadata
+        meta = get_audio_metadata(path)
+        if meta["sample_rate"] == 16000 and meta["channels"] == 1 and Path(path).suffix.lower() == ".wav":
+            processing_path = path
+        else:
+            import uuid
+            temp_wav = temp_dir / f"whisper_tmp_{uuid.uuid4()}.wav"
+            logger.info("Converting %s to 16kHz mono WAV for whisper.cpp...", path)
+            convert_to_mono_16k_wav(path, str(temp_wav))
+            processing_path = str(temp_wav)
+
         model_path = Path(self._config.model_path)
         if not model_path.exists():
             raise FileNotFoundError(
@@ -78,7 +100,7 @@ class WhisperCppASR:
         cmd: list[str] = [
             str(self._binary),
             "-m", str(model_path),
-            "-f", str(path),
+            "-f", processing_path,
         ]
 
         if self._config.language and self._config.language != "auto":

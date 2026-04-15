@@ -141,3 +141,11 @@ export function installWhisperBinary(variant?: string) {
 export function uninstallWhisperBinary() {
   return call("uninstall_whisper_binary");
 }
+
+// ------------------------------------------------------------------ //
+//  Transcription and Download API helpers                               //
+// ------------------------------------------------------------------ //
+
+export function downloadAndTranscribe(url: string) {
+  return call<{ status: string }>("download_and_transcribe", url);
+}
