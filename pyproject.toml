@@ -12,6 +12,7 @@ dependencies = [
     "sherpa-onnx>=1.10.0",
     "sherpa-onnx-bin>=1.12.35",
     "soundfile>=0.12.0",
+    "static-ffmpeg>=3.0",
     "yt-dlp>=2024.3.10",
 ]
 

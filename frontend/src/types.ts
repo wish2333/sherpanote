@@ -80,6 +80,8 @@ export interface AsrConfig {
   offline_use_vad: boolean;
   vad_padding: number;
   active_vad_model: string;
+  ytdlp_cookie_path: string;
+  ffmpeg_path: string;
 }
 
 export interface AppSettings {
@@ -158,4 +160,11 @@ export interface WhisperBinaryStatus {
   platform: string;
   available_variants: string[];
   default_variant: string | null;
+  source?: string;
+}
+
+/** External dependency status (ffmpeg, yt-dlp). */
+export interface DependencyStatus {
+  ffmpeg: { installed: boolean; source: string; path: string };
+  ytdlp: { installed: boolean; version: string };
 }

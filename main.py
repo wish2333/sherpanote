@@ -962,7 +962,9 @@ class SherpaNoteAPI(Bridge):
         temp_dir = str(Path(self._config.data_dir) / "temp")
         config = VideoDownloadConfig(
             output_dir=temp_dir,
-            proxy=self._config.asr.proxy_url if self._config.asr.proxy_mode == "manual" else ""
+            proxy=self._config.asr.proxy_url if self._config.asr.proxy_mode == "manual" else "",
+            cookie_file=self._config.asr.ytdlp_cookie_path or "",
+            ffmpeg_path=self._config.asr.ffmpeg_path or "",
         )
 
         def on_download_progress(progress: float) -> None:
@@ -1153,6 +1155,116 @@ class SherpaNoteAPI(Bridge):
         removed = uninstall_binary(data_dir)
         return {"success": True, "data": {"removed": removed}}
 
+    # ---- Dependency Management ----
+
+    @expose
+    def get_dependency_status(self) -> dict:
+        """Check status of external dependencies (ffmpeg, yt-dlp).
+
+        This is a lightweight check that does NOT trigger downloads.
+        """
+        import shutil
+        import platform as _platform
+
+        # Check ffmpeg.
+        ffmpeg_status: dict = {"installed": False, "source": "", "path": ""}
+
+        # 0. User-specified path (from config).
+        user_ffmpeg = self._config.asr.ffmpeg_path if self._config.asr.ffmpeg_path else ""
+        if user_ffmpeg:
+            candidate = user_ffmpeg.strip()
+            if os.path.isdir(candidate):
+                exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+                candidate = os.path.join(candidate, exe)
+            if os.path.isfile(candidate):
+                ffmpeg_status = {"installed": True, "source": "custom", "path": candidate}
+
+        # 1. Homebrew explicit paths (app bundles may have limited PATH).
+        machine = _platform.machine().lower()
+        if machine in ("arm64", "aarch64"):
+            brew_paths = ["/opt/homebrew/bin/ffmpeg"]
+        elif sys.platform == "darwin":
+            brew_paths = ["/usr/local/bin/ffmpeg"]
+        else:
+            brew_paths = []
+        for bp in brew_paths:
+            if os.path.isfile(bp):
+                ffmpeg_status = {"installed": True, "source": "homebrew", "path": bp}
+                break
+
+        # 2. System PATH.
+        if not ffmpeg_status["installed"]:
+            ffmpeg_path = shutil.which("ffmpeg")
+            if ffmpeg_path:
+                ffmpeg_status = {"installed": True, "source": "system", "path": ffmpeg_path}
+
+        # 3. static_ffmpeg on disk (no download).
+        if not ffmpeg_status["installed"]:
+            try:
+                import static_ffmpeg
+                pkg_dir = os.path.dirname(static_ffmpeg.__file__)
+                if sys.platform == "darwin":
+                    if machine in ("arm64", "aarch64"):
+                        platform_key = "darwin_arm64"
+                    else:
+                        platform_key = "darwin_x86_64"
+                elif sys.platform == "win32":
+                    platform_key = "windows_x64"
+                else:
+                    platform_key = f"linux_{machine}"
+                static_bin = os.path.join(pkg_dir, "bin", platform_key, "ffmpeg")
+                if os.path.isfile(static_bin):
+                    ffmpeg_status = {"installed": True, "source": "static-ffmpeg", "path": static_bin}
+            except Exception:
+                pass
+
+        # Check yt-dlp.
+        ytdlp_status: dict = {"installed": False, "version": ""}
+        try:
+            import yt_dlp
+            ytdlp_status = {"installed": True, "version": yt_dlp.version.__version__}
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "data": {
+                "ffmpeg": ffmpeg_status,
+                "ytdlp": ytdlp_status,
+            },
+        }
+
+    @expose
+    def install_static_ffmpeg(self) -> dict:
+        """Download static ffmpeg binaries via static_ffmpeg package."""
+        try:
+            import static_ffmpeg
+            static_ffmpeg.add_paths()
+
+            # Verify: check both PATH and explicit file location.
+            import shutil as _shutil
+            import platform as _platform
+            ffmpeg_path = _shutil.which("ffmpeg")
+            if not ffmpeg_path:
+                # Check on disk directly (may not be on PATH yet).
+                pkg_dir = os.path.dirname(static_ffmpeg.__file__)
+                machine = _platform.machine().lower()
+                if sys.platform == "darwin":
+                    platform_key = "darwin_arm64" if machine in ("arm64", "aarch64") else "darwin_x86_64"
+                elif sys.platform == "win32":
+                    platform_key = "windows_x64"
+                else:
+                    platform_key = f"linux_{machine}"
+                candidate = os.path.join(pkg_dir, "bin", platform_key, "ffmpeg")
+                if os.path.isfile(candidate):
+                    ffmpeg_path = candidate
+
+            if ffmpeg_path:
+                return {"success": True, "data": {"path": ffmpeg_path, "source": "static-ffmpeg"}}
+            return {"success": False, "error": "static_ffmpeg add_paths() succeeded but ffmpeg not found"}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
     def _get_whisper_asr(self) -> "WhisperCppASR | None":
         """Lazily initialize and return the WhisperCppASR instance."""
         if self._whisper_asr is None:
@@ -1225,6 +1337,25 @@ class SherpaNoteAPI(Bridge):
             )
             if result:
                 return {"success": True, "data": result}
+            return {"success": False, "error": "No file selected"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def pick_file(self, file_types: tuple[str, ...] = ("All Files (*.*)",)) -> dict:
+        """Open a native file picker dialog and return the selected path."""
+        try:
+            import webview
+            try:
+                dialog_type = webview.FileDialog.OPEN
+            except AttributeError:
+                dialog_type = webview.OPEN_DIALOG
+            result = self._window.create_file_dialog(
+                dialog_type=dialog_type,
+                file_types=file_types,
+            )
+            if result:
+                return {"success": True, "data": {"path": result[0]}}
             return {"success": False, "error": "No file selected"}
         except Exception as e:
             return {"success": False, "error": str(e)}

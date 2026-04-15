@@ -7,6 +7,8 @@ This module provides functionality to download audio from video URLs
 from __future__ import annotations
 
 import logging
+import shutil
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,10 +27,62 @@ class VideoDownloadConfig:
         output_dir: Directory where the downloaded audio will be saved.
         proxy: Proxy URL if needed for downloading.
         format: yt-dlp format selection string.
+        cookie_file: Path to cookie file for authenticated downloads.
     """
     output_dir: str
     proxy: str = ""
     format: str = "bestaudio/best"
+    cookie_file: str = ""
+    ffmpeg_path: str = ""
+
+
+def ensure_ffmpeg(ffmpeg_path_override: str = "") -> str | None:
+    """Ensure ffmpeg is available, returning its path or None.
+
+    Priority:
+    1. User-specified path (from config)
+    2. Platform-specific known paths (Homebrew, etc.)
+    3. System PATH
+    4. static_ffmpeg (may download on first call)
+    """
+    import os
+    import platform as _platform
+
+    # 1. User-specified path.
+    if ffmpeg_path_override:
+        candidate = ffmpeg_path_override.strip()
+        # If pointing to a directory, look for ffmpeg inside it.
+        if os.path.isdir(candidate):
+            exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+            candidate = os.path.join(candidate, exe)
+        if os.path.isfile(candidate):
+            return candidate
+
+    # 2. Platform-specific known paths (app bundles may have limited PATH).
+    known_paths: list[str] = []
+    machine = _platform.machine().lower()
+    if sys.platform == "darwin":
+        if machine in ("arm64", "aarch64"):
+            known_paths = ["/opt/homebrew/bin/ffmpeg"]
+        else:
+            known_paths = ["/usr/local/bin/ffmpeg"]
+    for kp in known_paths:
+        if os.path.isfile(kp):
+            return kp
+
+    # 3. System PATH.
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        return ffmpeg_path
+
+    # 4. static_ffmpeg (may download on first call).
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+        return shutil.which("ffmpeg")
+    except Exception as exc:
+        logger.warning("static_ffmpeg unavailable: %s", exc)
+        return None
 
 
 def download_audio(url: str, config: VideoDownloadConfig, on_progress: Callable[[float], None]) -> tuple[str, str]:
@@ -49,6 +103,17 @@ def download_audio(url: str, config: VideoDownloadConfig, on_progress: Callable[
     out_path = Path(config.output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
+    # Ensure ffmpeg is available for post-processing.
+    ffmpeg_path = ensure_ffmpeg(getattr(config, "ffmpeg_path", ""))
+    if not ffmpeg_path:
+        if sys.platform == "darwin":
+            hint = "请通过 Homebrew 安装 (brew install ffmpeg) 或在设置中点击安装 static-ffmpeg"
+        elif sys.platform == "win32":
+            hint = "请通过 winget/scoop/choco 安装 ffmpeg 或在设置中点击安装 static-ffmpeg"
+        else:
+            hint = "请安装 ffmpeg 或在设置中点击安装 static-ffmpeg"
+        raise RuntimeError(f"ffmpeg not found. {hint}")
+
     # Use a unique ID for the filename to avoid collisions and issues with special characters
     unique_id = str(uuid.uuid4())
     output_template = str(out_path / f"{unique_id}.%(ext)s")
@@ -66,10 +131,14 @@ def download_audio(url: str, config: VideoDownloadConfig, on_progress: Callable[
         ],
         "quiet": True,
         "no_warnings": True,
+        "ffmpeg_location": str(Path(ffmpeg_path).parent),
     }
 
     if config.proxy:
         ydl_opts["proxy"] = config.proxy
+
+    if config.cookie_file:
+        ydl_opts["cookiefile"] = config.cookie_file
 
     def progress_hook(d: dict) -> None:
         if d["status"] == "downloading":

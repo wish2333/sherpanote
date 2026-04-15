@@ -78,6 +78,8 @@ export const useAppStore = defineStore("app", () => {
     vad_padding: 0.8,
     active_vad_model: "auto",
     active_whisper_model: "",
+    ytdlp_cookie_path: "",
+    ffmpeg_path: "",
   });
 
   /* ---- toast notifications ---- */

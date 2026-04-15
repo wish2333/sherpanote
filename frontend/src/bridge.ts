@@ -1,5 +1,5 @@
 /** Core bridge functions for communicating with the Python backend. */
-import type { GpuStatus, WhisperBinaryStatus, ModelEntry, InstalledModel } from "./types";
+import type { GpuStatus, WhisperBinaryStatus, ModelEntry, InstalledModel, DependencyStatus } from "./types";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -110,6 +110,10 @@ export function pickDirectory() {
   return call<{ path: string }>("pick_directory");
 }
 
+export function pickFile(fileTypes?: string[]) {
+  return call<{ path: string }>("pick_file", fileTypes || ["All Files (*.*)"]);
+}
+
 export function validateModel(modelId: string) {
   return call<{ valid: boolean; missing?: string[] }>("validate_model", modelId);
 }
@@ -148,4 +152,16 @@ export function uninstallWhisperBinary() {
 
 export function downloadAndTranscribe(url: string) {
   return call<{ status: string }>("download_and_transcribe", url);
+}
+
+// ------------------------------------------------------------------ //
+//  Dependency Management helpers                                       //
+// ------------------------------------------------------------------ //
+
+export function getDependencyStatus() {
+  return call<DependencyStatus>("get_dependency_status");
+}
+
+export function installStaticFfmpeg() {
+  return call<{ path: string; source: string }>("install_static_ffmpeg");
 }

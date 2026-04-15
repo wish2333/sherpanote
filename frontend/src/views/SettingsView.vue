@@ -15,14 +15,17 @@ import {
   getWhisperBinaryStatus,
   installWhisperBinary,
   uninstallWhisperBinary,
+  getDependencyStatus,
+  installStaticFfmpeg,
+  pickFile,
+  pickDirectory,
   listAvailableModels,
   listInstalledModels,
   installModel,
   deleteModel,
   cancelModelInstall,
-  pickDirectory,
 } from "../bridge";
-import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus } from "../types";
+import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus } from "../types";
 
 const store = useAppStore();
 const router = useRouter();
@@ -38,6 +41,8 @@ const testResult = ref<{ success: boolean; message: string } | null>(null);
 const gpuStatus = ref<GpuStatus | null>(null);
 const whisperStatus = ref<WhisperBinaryStatus | null>(null);
 const isInstallingWhisper = ref(false);
+const depStatus = ref<DependencyStatus | null>(null);
+const isInstallingFfmpeg = ref(false);
 const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management">("general");
 
 const providers = [
@@ -416,6 +421,7 @@ async function handlePickDirectory() {
   const res = await pickDirectory();
   if (res.success && res.data) {
     asrConfig.value = { ...asrConfig.value, model_dir: res.data.path };
+    saveConfig();
   }
 }
 
@@ -444,6 +450,47 @@ async function handleUninstallWhisper() {
   if (res.success) {
     store.showToast("whisper.cpp uninstalled", "success");
     whisperStatus.value = { installed: false, version: null, platform: "", available_variants: [], default_variant: null };
+  }
+}
+
+// ---- Dependency management ----
+
+async function loadDependencyStatus() {
+  const res = await getDependencyStatus();
+  if (res.success && res.data) {
+    depStatus.value = res.data;
+  }
+}
+
+async function handleInstallFfmpeg() {
+  isInstallingFfmpeg.value = true;
+  try {
+    const res = await installStaticFfmpeg();
+    if (res.success) {
+      store.showToast("ffmpeg 安装成功", "success");
+      await loadDependencyStatus();
+    } else {
+      store.showToast(res.error ?? "ffmpeg 安装失败", "error");
+    }
+  } finally {
+    isInstallingFfmpeg.value = false;
+  }
+}
+
+async function handlePickFfmpegDir() {
+  const res = await pickDirectory();
+  if (res.success && res.data) {
+    asrConfig.value = { ...asrConfig.value, ffmpeg_path: res.data.path };
+    saveConfig();
+    await loadDependencyStatus();
+  }
+}
+
+async function handlePickCookieFile() {
+  const res = await pickFile(["All Files (*.*)", "Text Files (*.txt)"]);
+  if (res.success && res.data) {
+    asrConfig.value = { ...asrConfig.value, ytdlp_cookie_path: res.data.path };
+    saveConfig();
   }
 }
 
@@ -614,6 +661,8 @@ onMounted(async () => {
   if (whisperRes.success && whisperRes.data) {
     whisperStatus.value = whisperRes.data;
   }
+  // Check dependency status (ffmpeg, yt-dlp)
+  await loadDependencyStatus();
 });
 
 onUnmounted(() => {
@@ -761,6 +810,95 @@ onUnmounted(() => {
               <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
               保存
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tool Dependencies -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">工具依赖</h2>
+          <p class="text-sm text-base-content/60">
+            视频下载需要 ffmpeg，以下为当前依赖状态。
+          </p>
+          <p class="text-xs text-base-content/40 mt-1">
+            也可手动安装：macOS — brew install ffmpeg ｜ Windows — winget install ffmpeg 或 scoop install ffmpeg
+          </p>
+
+          <div class="mt-4 space-y-4">
+            <!-- ffmpeg -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">ffmpeg</span>
+                <span
+                  v-if="depStatus?.ffmpeg.installed"
+                  class="badge badge-success badge-sm"
+                >
+                  已安装 ({{ depStatus.ffmpeg.source }})
+                </span>
+                <span v-else class="badge badge-error badge-sm">未安装</span>
+              </label>
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="!depStatus?.ffmpeg.installed"
+                  class="btn btn-primary btn-xs"
+                  :disabled="isInstallingFfmpeg"
+                  @click="handleInstallFfmpeg"
+                >
+                  <span v-if="isInstallingFfmpeg" class="loading loading-spinner loading-xs"></span>
+                  {{ isInstallingFfmpeg ? '安装中...' : '安装 static-ffmpeg' }}
+                </button>
+                <span class="text-xs text-base-content/40">
+                  如已安装但未检测到，可手动指定路径：
+                </span>
+              </div>
+              <div class="flex gap-2 mt-1">
+                <input
+                  v-model="asrConfig.ffmpeg_path"
+                  type="text"
+                  placeholder="ffmpeg 所在目录或完整路径（可选）"
+                  class="input input-bordered input-sm flex-1"
+                  @change="saveConfig"
+                />
+                <button class="btn btn-outline btn-xs" @click="handlePickFfmpegDir">浏览</button>
+              </div>
+            </div>
+
+            <!-- yt-dlp -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">yt-dlp</span>
+                <span
+                  v-if="depStatus?.ytdlp.installed"
+                  class="badge badge-success badge-sm"
+                >
+                  v{{ depStatus.ytdlp.version }}
+                </span>
+                <span v-else class="badge badge-error badge-sm">未安装</span>
+              </label>
+            </div>
+
+            <!-- Cookie file for yt-dlp -->
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-medium">yt-dlp Cookie 文件</span>
+              </label>
+              <label class="label">
+                <span class="label-text-alt text-base-content/40">
+                  用于下载需要登录的视频（如 Bilibili、YouTube 会员内容）。请选择 Netscape 格式的 cookie 文件。
+                </span>
+              </label>
+              <div class="flex gap-2">
+                <input
+                  v-model="asrConfig.ytdlp_cookie_path"
+                  type="text"
+                  placeholder="cookie 文件路径（可选）"
+                  class="input input-bordered input-sm flex-1"
+                  @change="saveConfig"
+                />
+                <button class="btn btn-outline btn-xs" @click="handlePickCookieFile">浏览</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1469,7 +1607,7 @@ onUnmounted(() => {
                 <div>
                   <span class="text-sm">
                     二进制状态:
-                    <span v-if="whisperStatus?.installed" class="text-success">已安装 (v{{ whisperStatus.version }})</span>
+                    <span v-if="whisperStatus?.installed" class="text-success">已安装 (v{{ whisperStatus.version }}{{ whisperStatus.source === 'homebrew' ? ', Homebrew' : '' }})</span>
                     <span v-else class="text-error">未安装</span>
                   </span>
                 </div>

@@ -46,6 +46,8 @@ class AsrConfig:
     offline_use_vad: bool = True
     vad_padding: float = 0.8
     active_vad_model: str = "auto"
+    ytdlp_cookie_path: str = ""
+    ffmpeg_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,8 @@ class AppConfig:
                 "offline_use_vad": self.asr.offline_use_vad,
                 "vad_padding": self.asr.vad_padding,
                 "active_vad_model": self.asr.active_vad_model,
+                "ytdlp_cookie_path": self.asr.ytdlp_cookie_path,
+                "ffmpeg_path": self.asr.ffmpeg_path,
             },
             "ai": {
                 "provider": self.ai.provider,
@@ -158,6 +162,8 @@ class AppConfig:
                 offline_use_vad=asr_d.get("offline_use_vad", True),
                 vad_padding=asr_d.get("vad_padding", 0.8),
                 active_vad_model=asr_d.get("active_vad_model", "auto"),
+                ytdlp_cookie_path=asr_d.get("ytdlp_cookie_path", ""),
+                ffmpeg_path=asr_d.get("ffmpeg_path", ""),
             ),
             ai=AiConfig(
                 provider=ai_d.get("provider", "openai"),

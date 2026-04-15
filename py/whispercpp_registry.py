@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+_IS_MACOS = sys.platform == "darwin"
+
 logger = logging.getLogger(__name__)
 
 # whisper.cpp version to use for all platforms.
@@ -135,13 +137,16 @@ def get_binary_path(data_dir: str | Path) -> Path:
     """Return the expected path to the whisper-cli executable."""
     install_dir = get_install_dir(data_dir)
 
-    # Windows: flat extraction (main.exe + DLLs).
+    # Windows: check app-managed dir, then system PATH.
     if sys.platform == "win32":
         found = _find_binary_in_dir(install_dir)
         if found:
             return found
+        system_binary = shutil.which("whisper-cli")
+        if system_binary:
+            return Path(system_binary)
 
-    # macOS / Linux: xcframework or direct binary.
+    # macOS / Linux: homebrew, system PATH, xcframework, app-managed dir.
     found = get_macos_binary_path(data_dir)
     if found and found.exists():
         return found
@@ -153,11 +158,28 @@ def get_binary_path(data_dir: str | Path) -> Path:
 
 
 def get_macos_binary_path(data_dir: str | Path) -> Path | None:
-    """Return the macOS xcframework binary path, or None if not found."""
-    install_dir = get_install_dir(data_dir)
-    machine = platform.machine().lower()
+    """Return the macOS binary path, or None if not found.
 
-    # Try inside xcframework structure.
+    Priority:
+    1. Homebrew (explicit paths, since .app bundles have limited PATH)
+    2. System PATH (covers other package managers)
+    3. App-managed xcframework directory
+    4. Direct binary in install dir
+    """
+    # 1. Check Homebrew paths explicitly (app bundles may not have /opt/homebrew/bin on PATH).
+    machine = platform.machine().lower()
+    homebrew_prefix = "/opt/homebrew" if machine in ("arm64", "aarch64") else "/usr/local"
+    homebrew_bin = Path(homebrew_prefix) / "bin" / "whisper-cli"
+    if homebrew_bin.exists():
+        return homebrew_bin
+
+    # 2. Check system PATH.
+    system_binary = shutil.which("whisper-cli")
+    if system_binary:
+        return Path(system_binary)
+
+    # 3. Try inside xcframework structure.
+    install_dir = get_install_dir(data_dir)
     if machine in ("arm64", "aarch64"):
         sub = "macos-arm64"
     else:
@@ -166,7 +188,7 @@ def get_macos_binary_path(data_dir: str | Path) -> Path | None:
     if xcframework.exists():
         return xcframework
 
-    # Fallback: direct binary in install dir.
+    # 4. Fallback: direct binary in install dir.
     found = _find_binary_in_dir(install_dir)
     return found
 
@@ -240,7 +262,29 @@ def install_binary(
     install_dir = get_install_dir(data_dir)
     install_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download.
+    # macOS: check if already installed via Homebrew.
+    if _IS_MACOS:
+        homebrew_path = get_macos_binary_path(data_dir)
+        if homebrew_path:
+            return {
+                "success": True,
+                "variant": "homebrew",
+                "version": WHISPER_CPP_VERSION,
+                "source": "homebrew",
+            }
+
+    # macOS: no pre-built CLI in the official release — guide user to Homebrew.
+    if _IS_MACOS:
+        return {
+            "success": False,
+            "error": (
+                "macOS 没有预编译的 whisper-cli 二进制文件。"
+                "请通过 Homebrew 安装：brew install whisper-cpp"
+            ),
+            "suggest_brew": True,
+        }
+
+    # Download (Windows only).
     tmp_path = install_dir / "_download.tmp"
     try:
         _download_file(
@@ -378,10 +422,19 @@ def get_status(data_dir: str | Path) -> dict[str, Any]:
     """Return the current installation status."""
     installed = is_installed(data_dir)
     available = get_available_binaries()
+
+    # Detect installation source.
+    source = None
+    if installed and _IS_MACOS:
+        system_binary = get_macos_binary_path(data_dir)
+        if system_binary and "homebrew" in str(system_binary):
+            source = "homebrew"
+
     return {
         "installed": installed,
         "version": WHISPER_CPP_VERSION if installed else None,
         "platform": _current_platform(),
         "available_variants": [b.variant for b in available],
         "default_variant": get_default_binary().variant if available else None,
+        "source": source,
     }
