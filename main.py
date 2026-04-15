@@ -1144,7 +1144,9 @@ class SherpaNoteAPI(Bridge):
             proxy_mode=self._config.asr.proxy_mode,
             proxy_url=self._config.asr.proxy_url,
         )
-        return result
+        if result.get("success"):
+            return {"success": True, "data": result}
+        return {"success": False, "error": result.get("error", "Unknown error")}
 
     @expose
     def uninstall_whisper_binary(self) -> dict:
@@ -1441,6 +1443,12 @@ class SherpaNoteAPI(Bridge):
         if not success:
             return {"success": False, "error": "Cannot delete built-in presets"}
         return {"success": True, "data": {"preset_id": preset_id}}
+
+    @expose
+    def reset_builtin_presets(self) -> dict:
+        """Reset all built-in processing presets to their default prompts."""
+        presets = self._processing_preset_store.reset_builtins()
+        return {"success": True, "data": presets}
 
     # ---- Config ----
 

@@ -139,7 +139,7 @@ export function getWhisperBinaryStatus() {
 }
 
 export function installWhisperBinary(variant?: string) {
-  return call("install_whisper_binary", variant ?? null);
+  return call<{ variant?: string; version?: string; switched?: boolean; source?: string }>("install_whisper_binary", variant ?? null);
 }
 
 export function uninstallWhisperBinary() {

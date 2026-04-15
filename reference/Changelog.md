@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.3.1] - 2026-04-15
+
+### New
+- Whisper.cpp CUDA Support: Windows users can now enable GPU acceleration for a significant transcription speed boost
+- Whisper.cpp Model Selection: Support for multiple model versions, allowing you to choose size and precision based on your needs
+- LLM Prompt Management: Built-in prompts can be edited via the settings interface, with one-click reset to defaults available
+
+### Fixes
+- Fixed static FFmpeg button visibility issue when an existing installation is detected
+- Fixed yt-dlp Cookie description text overflow display issue
+
+### Optimizations
+- Whispercpp now supports multiple versions co-existing, no need to re-download when installing or switching versions
+- AI processing built-in mode prompts can now be customized via the settings interface
+
 ## [1.3.0] - 2026-04-15
 
 ### Added

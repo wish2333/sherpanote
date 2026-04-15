@@ -3,6 +3,8 @@
 Stores custom AI processing prompt presets in SQLite
 so users can define, save, and switch between different
 prompt templates for text processing.
+
+Default prompts are sourced from py.llm._PROMPTS (single source of truth).
 """
 
 from __future__ import annotations
@@ -15,73 +17,30 @@ from pathlib import Path
 from typing import Any
 
 from py.config import _DEFAULT_DATA_DIR
+from py.llm import _PROMPTS
 
 logger = logging.getLogger(__name__)
 
-# Built-in default presets seeded on first use.
-_BUILTIN_PRESETS: list[dict[str, Any]] = [
-    {
-        "id": "builtin_polish",
-        "name": "Polish",
-        "mode": "polish",
-        "prompt": (
-            "You are a professional text editor. "
-            "Revise the following speech transcript into fluent written prose:\n"
-            "- Fix colloquialisms and grammatical errors\n"
-            "- Remove filler words and repetitions\n"
-            "- Preserve original meaning\n"
-            "- Output plain text only, no extra commentary\n\n"
-            "Text:\n{text}"
-        ),
-        "is_default": True,
-        "sort_order": 0,
-    },
-    {
-        "id": "builtin_note",
-        "name": "Notes",
-        "mode": "note",
-        "prompt": (
-            "You are an efficient study assistant. "
-            "Organize the following content into structured notes:\n"
-            "- Extract key knowledge points\n"
-            "- Organize by hierarchy (level 1, 2, 3 headings)\n"
-            "- Highlight important items\n"
-            "- Use Markdown format\n\n"
-            "Content:\n{text}"
-        ),
-        "is_default": True,
-        "sort_order": 1,
-    },
-    {
-        "id": "builtin_mindmap",
-        "name": "Mind Map",
-        "mode": "mindmap",
-        "prompt": (
-            "Convert the following content into a Markmap-format mind map:\n"
-            "- Start with a central topic\n"
-            "- Expand key concepts hierarchically\n"
-            "- Use Markdown heading levels for hierarchy\n\n"
-            "Content:\n{text}"
-        ),
-        "is_default": True,
-        "sort_order": 2,
-    },
-    {
-        "id": "builtin_brainstorm",
-        "name": "Brainstorm",
-        "mode": "brainstorm",
-        "prompt": (
-            "You are a critical-thinking mentor. Based on the following content:\n"
-            "- Propose 3-5 extension questions\n"
-            "- Point out weaknesses or gaps\n"
-            "- Provide relevant background context\n"
-            "- Suggest directions for further exploration\n\n"
-            "Content:\n{text}"
-        ),
-        "is_default": True,
-        "sort_order": 3,
-    },
+# Display labels for each built-in mode.
+_BUILTIN_META: list[dict[str, Any]] = [
+    {"id": "builtin_polish", "name": "Polish", "mode": "polish", "sort_order": 0},
+    {"id": "builtin_note", "name": "Notes", "mode": "note", "sort_order": 1},
+    {"id": "builtin_mindmap", "name": "Mind Map", "mode": "mindmap", "sort_order": 2},
+    {"id": "builtin_brainstorm", "name": "Brainstorm", "mode": "brainstorm", "sort_order": 3},
 ]
+
+
+def _get_builtin_defaults() -> list[dict[str, Any]]:
+    """Build builtin preset list from _PROMPTS (single source of truth)."""
+    presets = []
+    for meta in _BUILTIN_META:
+        prompt = _PROMPTS.get(meta["mode"], "")
+        presets.append({
+            **meta,
+            "prompt": prompt,
+            "is_default": True,
+        })
+    return presets
 
 
 class ProcessingPresetStore:
@@ -123,7 +82,7 @@ class ProcessingPresetStore:
         """Insert built-in presets if they don't exist."""
         conn = self._get_conn()
         now = datetime.now(timezone.utc).isoformat()
-        for preset in _BUILTIN_PRESETS:
+        for preset in _get_builtin_defaults():
             existing = conn.execute(
                 "SELECT id FROM ai_processing_presets WHERE id = ?",
                 (preset["id"],),
@@ -145,6 +104,22 @@ class ProcessingPresetStore:
                     ),
                 )
         conn.commit()
+
+    def reset_builtins(self) -> list[dict[str, Any]]:
+        """Reset all built-in presets to their default prompts from _PROMPTS."""
+        conn = self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+        updated = []
+        for preset in _get_builtin_defaults():
+            conn.execute(
+                """UPDATE ai_processing_presets
+                   SET prompt=?, updated_at=?
+                   WHERE id=?""",
+                (preset["prompt"], now, preset["id"]),
+            )
+            updated.append(self.get(preset["id"]))
+        conn.commit()
+        return [p for p in updated if p]
 
     def list(self) -> list[dict[str, Any]]:
         """List all presets sorted by sort_order."""

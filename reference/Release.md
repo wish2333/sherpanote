@@ -1,3 +1,20 @@
+## 2026-04-15 - 多平台性能优化与界面改进
+
+[update-1.3.1](https://github.com/wish2333/sherpanote/releases/tag/update-1.3.1)
+
+### ✨ 新增
+- Whisper.cpp CUDA支持：Windows用户现在可启用GPU加速大幅提升转写速度
+- Whisper.cpp模型选择：支持多个模型版本，可根据需求选择大小和精度
+- LLM提示词统一管理：内置提示词可通过设置界面编辑，支持一键恢复默认
+
+### 🐛 修复
+- 修复静态FFmpeg按钮在已有安装时不可见的问题
+- 修复yt-dlp Cookie描述文本界面溢出显示问题
+
+### ⚡ 优化
+- Whispercpp支持多版本共存，安装/切换版本无需重复下载
+- AI处理内置模式提示词现在可通过设置界面自定义
+
 ## 2026-04-15 - Whisper, CUDA, 网络视频转录
 
 [update-1.3.0](https://github.com/wish2333/sherpanote/releases/tag/update-1.3.0)

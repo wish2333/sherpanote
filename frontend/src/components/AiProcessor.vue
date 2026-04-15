@@ -51,15 +51,23 @@ const customPresets = computed(() =>
 
 /** Resolve the custom prompt for the currently selected mode. */
 function getCustomPrompt(): string | null {
-  if (!currentMode.value.includes("_preset_")) return null;
-  const presetId = currentMode.value.split("_preset_")[1];
-  return processingPresets.value.find(p => p.id === presetId)?.prompt ?? null;
+  const mode = currentMode.value;
+  if (mode.includes("_preset_")) {
+    const presetId = mode.split("_preset_")[1];
+    return processingPresets.value.find(p => p.id === presetId)?.prompt ?? null;
+  }
+  // Built-in modes: check if a matching builtin preset has a custom prompt.
+  const preset = processingPresets.value.find(p => p.id === `builtin_${mode}`);
+  return preset?.prompt ?? null;
 }
 
 /** Resolve the processing preset ID from the current mode key. */
 function getPresetId(): string | null {
-  if (!currentMode.value.includes("_preset_")) return null;
-  return currentMode.value.split("_preset_")[1];
+  const mode = currentMode.value;
+  if (mode.includes("_preset_")) {
+    return mode.split("_preset_")[1];
+  }
+  return `builtin_${mode}`;
 }
 
 function selectMode(mode: AiMode) {
