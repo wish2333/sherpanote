@@ -220,20 +220,25 @@ Configuration can be modified through the **Settings** interface.
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
 
-[2026-04-15 - 1.3.1 - 多平台性能优化与界面改进]
+[2026-04-16 - Stability Improvements and Backup Functionality]
 
 ### ✨ New
-- Whisper.cpp CUDA Support: Windows users can now enable GPU acceleration for a significant transcription speed boost
-- Whisper.cpp Model Selection: Support for multiple model versions, allowing you to choose size and precision based on your needs
-- LLM Prompt Management: Built-in prompts can be edited via the settings interface, with one-click reset to defaults available
+
+- Added data backup feature: Allows backing up application settings, presets, transcription history, and audio files in settings
+- Supports selective backup, allowing flexible choice of data types to back up
+- Automatic compatibility with different operating systems after import, enabling cross-platform data transfer
 
 ### 🐛 Fixes
-- Fixed static FFmpeg button visibility issue when an existing installation is detected
-- Fixed yt-dlp Cookie description text overflow display issue
+
+- Fixed the issue where a new window was unexpectedly opened when downloading models on Mac
+- Resolved the problem where leaving the recording interface during AI processing caused results to be lost
+- Fixed incorrect display of Markdown headings and tables
+- Solved timeout and 404 errors that occurred when downloading models from hf-mirror
 
 ### ⚡ Optimizations
-- Whispercpp now supports multiple versions co-existing, no need to re-download when installing or switching versions
-- AI processing built-in mode prompts can now be customized via the settings interface
+
+- Improved the persistence mechanism for AI processing results to ensure a seamless user experience
+- Enhanced stability and speed of model downloads, reducing failures caused by network issues
 
 ## Contributing
 

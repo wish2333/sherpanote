@@ -281,7 +281,7 @@ function setupAiListeners() {
     currentResultContent.value = accumulatedText;
   });
 
-  offAiComplete = onEvent<{ result: string; truncated?: boolean }>("ai_complete", (detail) => {
+  offAiComplete = onEvent<{ result: string; truncated?: boolean; record?: TranscriptRecord }>("ai_complete", (detail) => {
     isAiProcessing.value = false;
     accumulatedText = "";
     currentResultContent.value = detail.result;
@@ -289,10 +289,14 @@ function setupAiListeners() {
       truncationWarning.value = true;
       store.showToast("Output truncated. Increase max_tokens or click Continue.", "warning");
     }
-    autoSaveResult();
+    if (detail.record) {
+      record.value = detail.record;
+    } else {
+      autoSaveResult();
+    }
   });
 
-  offAiContinueComplete = onEvent<{ result: string; truncated?: boolean }>("ai_continue_complete", (detail) => {
+  offAiContinueComplete = onEvent<{ result: string; truncated?: boolean; record?: TranscriptRecord }>("ai_continue_complete", (detail) => {
     isAiProcessing.value = false;
     accumulatedText = "";
     if (detail.truncated) {
@@ -302,7 +306,11 @@ function setupAiListeners() {
       truncationWarning.value = false;
       store.showToast("Output completed", "success");
     }
-    autoSaveResult();
+    if (detail.record) {
+      record.value = detail.record;
+    } else {
+      autoSaveResult();
+    }
   });
 
   offAiError = onEvent<{ error: string }>("ai_error", (detail) => {
@@ -321,7 +329,7 @@ function handleProcessRequest(mode: string, _presetId: string | null, customProm
   activeResultMode.value = mode;
   showMindMap.value = false;
   setupAiListeners();
-  call("process_text_stream", editorText.value, mode, customPrompt ?? null);
+  call("process_text_stream", editorText.value, mode, customPrompt ?? null, record.value.id);
 }
 
 function handleCancelAi() {
@@ -336,7 +344,7 @@ function handleContinueOutput() {
   accumulatedText = currentResultContent.value;
   truncationWarning.value = false;
   setupAiListeners();
-  call("continue_text_stream", currentResultContent.value, activeResultMode.value ?? "polish");
+  call("continue_text_stream", currentResultContent.value, activeResultMode.value ?? "polish", null, record.value?.id ?? null);
 }
 
 function handleSelectResult(mode: string) {
@@ -463,6 +471,16 @@ onBeforeUnmount(async () => {
   offAiComplete?.();
   offAiContinueComplete?.();
   offAiError?.();
+
+  // Save partial AI result if processing is still in progress (backend will
+  // save the full result on its own; this is a fallback for very long-running jobs).
+  if (isAiProcessing.value && record.value && activeResultMode.value && currentResultContent.value) {
+    try {
+      await persistResult(record.value, activeResultMode.value, currentResultContent.value);
+    } catch {
+      // Best-effort: backend will persist the complete result independently
+    }
+  }
 
   // Only save version if content actually differs from last version snapshot
   if (editorText.value !== lastVersionContent && record.value) {
