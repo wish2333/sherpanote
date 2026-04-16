@@ -26,6 +26,7 @@ from py.processing_presets import ProcessingPresetStore
 from py import model_manager as _mm
 from py import model_registry as _mr
 from py.video_downloader import VideoDownloadConfig, download_audio
+from py import backup as _backup
 
 logger = logging.getLogger(__name__)
 
@@ -416,9 +417,11 @@ class SherpaNoteAPI(Bridge):
             return {"success": False, "error": str(e)}
 
     @expose
-    def process_text_stream(self, text: str, mode: str, custom_prompt: str = None) -> dict:
+    def process_text_stream(self, text: str, mode: str, custom_prompt: str = None, record_id: str = None) -> dict:
         """Stream AI results. Tokens pushed via _emit('ai_token').
         custom_prompt: optional prompt template with {text} placeholder.
+        record_id: optional; when provided, the result is persisted to DB
+                   so it survives frontend navigation.
         Streaming runs in a background thread to avoid blocking the main thread."""
         def _work() -> None:
             try:
@@ -429,7 +432,12 @@ class SherpaNoteAPI(Bridge):
                 if self._get_ai()._cancel_event.is_set():
                     self._emit("ai_error", {"error": "Cancelled"})
                     return
-                self._emit("ai_complete", {"result": result, "truncated": truncated})
+
+                saved_record = None
+                if record_id:
+                    saved_record = self._persist_ai_result(record_id, mode, result)
+
+                self._emit("ai_complete", {"result": result, "truncated": truncated, "record": saved_record})
             except Exception as e:
                 self._emit("ai_error", {"error": str(e)})
 
@@ -445,11 +453,12 @@ class SherpaNoteAPI(Bridge):
         return {"success": False, "error": "No active AI session"}
 
     @expose
-    def continue_text_stream(self, previous_output: str, mode: str, custom_prompt: str = None) -> dict:
+    def continue_text_stream(self, previous_output: str, mode: str, custom_prompt: str = None, record_id: str = None) -> dict:
         """Continue AI output from where it was truncated.
 
         Takes the previous output and asks the AI to continue from the last point.
         Streams continuation tokens via _emit('ai_token').
+        record_id: optional; when provided, the result is persisted to DB.
         Runs in a background thread to avoid blocking the main thread.
         """
         def _work() -> None:
@@ -463,12 +472,36 @@ class SherpaNoteAPI(Bridge):
                 if self._get_ai()._cancel_event.is_set():
                     self._emit("ai_error", {"error": "Cancelled"})
                     return
-                self._emit("ai_continue_complete", {"result": result, "truncated": truncated})
+
+                saved_record = None
+                if record_id:
+                    saved_record = self._persist_ai_result(record_id, mode, result)
+
+                self._emit("ai_continue_complete", {"result": result, "truncated": truncated, "record": saved_record})
             except Exception as e:
                 self._emit("ai_error", {"error": str(e)})
 
         threading.Thread(target=_work, daemon=True).start()
         return {"success": True, "data": {"status": "streaming"}}
+
+    def _persist_ai_result(self, record_id: str, mode: str, result: str) -> dict | None:
+        """Persist an AI processing result to a record in the database.
+
+        Returns the annotated saved record, or None on failure.
+        Thread-safe: called from background threads.
+        """
+        try:
+            record = self._storage.get(record_id)
+            if record is None:
+                logger.warning("Cannot persist AI result: record %s not found", record_id)
+                return None
+            ai_results = dict(record.get("ai_results", {}) or {})
+            ai_results[mode] = result
+            saved = self._storage.save({**record, "ai_results": ai_results})
+            return self._annotate_record(saved)
+        except Exception as exc:
+            logger.warning("Failed to persist AI result for record %s: %s", record_id, exc)
+            return None
 
     def _auto_process_record(self, record: dict) -> dict:
         """Run configured auto AI processing modes on a record.
@@ -1558,6 +1591,39 @@ class SherpaNoteAPI(Bridge):
         # Re-create ASR if model_dir changed.
         self._asr = None
         return {"success": True, "data": self._config.to_dict()}
+
+    # ---- Backup / Restore ----
+
+    @expose
+    def export_backup(self, path: str, options: dict) -> dict:
+        """Export application data to a ZIP backup file."""
+        try:
+            output = _backup.export_backup(
+                path,
+                include_config=options.get("include_config", True),
+                include_presets=options.get("include_presets", True),
+                include_records=options.get("include_records", True),
+                include_versions=options.get("include_versions", True),
+                include_audio=options.get("include_audio", False),
+            )
+            return {"success": True, "data": {"path": output}}
+        except Exception as e:
+            logger.exception("export_backup failed")
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def import_backup(self, path: str) -> dict:
+        """Import data from a ZIP backup file. Replaces existing data."""
+        try:
+            summary = _backup.import_backup(path)
+            # Reload config to pick up imported settings.
+            self._config = self._config_store.load()
+            self._ai = None
+            self._asr = None
+            return {"success": True, "data": summary}
+        except Exception as e:
+            logger.exception("import_backup failed")
+            return {"success": False, "error": str(e)}
 
     # ---- Utilities ----
 

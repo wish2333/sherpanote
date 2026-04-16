@@ -113,6 +113,7 @@ MODELS: tuple[ModelEntry, ...] = (
         required_files=("tokens.txt", "model.onnx"),
         sha256="426db3bf7d2cc0d083089e57054033682726041a9de0cf51aaf98723b9908681",
         sources=("github", "huggingface", "hf_mirror", "modelscope"),
+        hf_files=("tokens.txt", "model.onnx"),
     ),
     ModelEntry(
         model_id="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
@@ -124,6 +125,7 @@ MODELS: tuple[ModelEntry, ...] = (
         description="SenseVoice int8 model with multilingual support (zh/en/ja/ko/yue). Supports simulated streaming via VAD for real-time mic input.",
         required_files=("tokens.txt", "model.int8.onnx"),
         sources=("github", "huggingface", "hf_mirror", "ghproxy"),
+        hf_files=("tokens.txt", "model.int8.onnx"),
     ),
     ModelEntry(
         model_id="sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01",

@@ -4,7 +4,7 @@
  *
  * Handles common Markdown constructs from LLM output:
  * headings, bold, italic, strikethrough, lists, code blocks,
- * horizontal rules, links, and blockquotes.
+ * horizontal rules, links, blockquotes, and tables.
  * No external dependency required.
  */
 import { computed } from "vue";
@@ -24,6 +24,7 @@ function renderMarkdown(md: string): string {
   let inList = false;
   let listKind = ""; // "ul" | "ol"
   let inBlockquote = false;
+  let inTable = false;
 
   function closeList() {
     if (inList) {
@@ -38,6 +39,30 @@ function renderMarkdown(md: string): string {
       result.push("</blockquote>");
       inBlockquote = false;
     }
+  }
+
+  function closeTable() {
+    if (inTable) {
+      result.push("</tbody></table>");
+      inTable = false;
+    }
+  }
+
+  function isTableRow(line: string): boolean {
+    const trimmed = line.trim();
+    return trimmed.startsWith("|") && trimmed.endsWith("|");
+  }
+
+  function isTableSeparator(line: string): boolean {
+    const trimmed = line.trim();
+    return /^\|[\s:|-]+\|$/.test(trimmed);
+  }
+
+  function parseTableRow(line: string, isHeader: boolean): string {
+    const cells = line.trim().slice(1, -1).split("|");
+    const tag = isHeader ? "th" : "td";
+    const tags = cells.map((cell) => `<${tag}>${inlineFormat(cell.trim())}</${tag}>`);
+    return tags.join("");
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -67,12 +92,14 @@ function renderMarkdown(md: string): string {
     if (line.trim() === "") {
       closeList();
       closeBlockquote();
+      closeTable();
       continue;
     }
 
     // Blockquote
     if (line.trimStart().startsWith("> ")) {
       closeList();
+      closeTable();
       if (!inBlockquote) {
         result.push("<blockquote>");
         inBlockquote = true;
@@ -84,12 +111,44 @@ function renderMarkdown(md: string): string {
     }
 
     // Headings
-    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
     if (headingMatch) {
       closeList();
+      closeTable();
       const level = headingMatch[1].length;
       result.push(`<h${level}>${inlineFormat(headingMatch[2])}</h${level}>`);
       continue;
+    }
+
+    // Table
+    if (isTableRow(line)) {
+      closeList();
+      closeBlockquote();
+      // Look ahead: if next non-empty line is a separator, this is the header row.
+      const isHeader =
+        !inTable &&
+        i + 1 < lines.length &&
+        isTableSeparator(lines[i + 1]);
+      if (!inTable) {
+        inTable = true;
+        if (isHeader) {
+          result.push("<table><thead>");
+          result.push(`<tr>${parseTableRow(line, true)}</tr>`);
+          // The separator row itself will be caught on the next iteration
+          // and skipped, switching us to tbody.
+          continue;
+        }
+        result.push("<table><tbody>");
+      }
+      // Skip separator row; switch from thead to tbody.
+      if (isTableSeparator(line)) {
+        result.push("</thead><tbody>");
+        continue;
+      }
+      result.push(`<tr>${parseTableRow(line, false)}</tr>`);
+      continue;
+    } else if (inTable) {
+      closeTable();
     }
 
     // Horizontal rule
@@ -132,6 +191,7 @@ function renderMarkdown(md: string): string {
 
   closeList();
   closeBlockquote();
+  closeTable();
 
   return result.join("\n");
 }

@@ -24,7 +24,10 @@ import {
   installModel,
   deleteModel,
   cancelModelInstall,
+  exportBackup,
+  importBackup,
 } from "../bridge";
+import type { BackupOptions, BackupSummary } from "../bridge";
 import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus } from "../types";
 
 const store = useAppStore();
@@ -43,7 +46,7 @@ const whisperStatus = ref<WhisperBinaryStatus | null>(null);
 const isInstallingWhisper = ref(false);
 const depStatus = ref<DependencyStatus | null>(null);
 const isInstallingFfmpeg = ref(false);
-const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management">("general");
+const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management" | "backup">("general");
 
 const providers = [
   { value: "openai", label: "OpenAI" },
@@ -709,6 +712,98 @@ onMounted(async () => {
   await loadDependencyStatus();
 });
 
+// ---- Backup / Restore ----
+const backupOptions = ref<BackupOptions>({
+  include_config: true,
+  include_presets: true,
+  include_records: true,
+  include_versions: true,
+  include_audio: false,
+});
+const isExporting = ref(false);
+const isImporting = ref(false);
+const importResult = ref<BackupSummary | null>(null);
+const importConfirmOpen = ref(false);
+const pendingImportPath = ref<string | null>(null);
+
+async function handleExport() {
+  const res = await pickDirectory();
+  if (!res.success || !res.data) return;
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const filename = `sherpanote_backup_${timestamp}.zip`;
+  const outputPath = `${res.data.path}/${filename}`;
+
+  isExporting.value = true;
+  try {
+    const result = await exportBackup(outputPath, backupOptions.value);
+    if (result.success) {
+      store.showToast("Backup exported successfully", "success");
+    } else {
+      store.showToast(result.error || "Export failed", "error");
+    }
+  } catch {
+    store.showToast("Export failed", "error");
+  } finally {
+    isExporting.value = false;
+  }
+}
+
+async function handlePickImportFile() {
+  const res = await pickFile(["ZIP Files (*.zip)"]);
+  if (!res.success || !res.data) return;
+  pendingImportPath.value = res.data.path;
+  importConfirmOpen.value = true;
+}
+
+async function confirmImport() {
+  if (!pendingImportPath.value) return;
+  isImporting.value = true;
+  importConfirmOpen.value = false;
+  try {
+    const result = await importBackup(pendingImportPath.value);
+    if (result.success && result.data) {
+      importResult.value = result.data;
+      store.showToast("Backup imported successfully. Reloading page...", "success");
+      // Reload config from backend
+      const configRes = await call<Record<string, unknown>>("get_config");
+      if (configRes.success && configRes.data) {
+        const cfg = configRes.data as Record<string, unknown>;
+        if (cfg.ai) {
+          const ai = cfg.ai as Record<string, unknown>;
+          store.aiConfig = {
+            provider: (ai.provider as string) ?? "openai",
+            model: (ai.model as string) ?? "gpt-4o-mini",
+            api_key: (ai.api_key as string | null) ?? null,
+            base_url: (ai.base_url as string | null) ?? null,
+            temperature: (ai.temperature as number) ?? 0.7,
+            max_tokens: (ai.max_tokens as number) ?? 8192,
+          };
+        }
+        if (cfg.asr) {
+          const asr = cfg.asr as Record<string, unknown>;
+          store.asrConfig = { ...store.asrConfig, ...Object.fromEntries(
+            Object.entries(asr).filter(([_, v]) => v !== undefined)
+          ) } as typeof store.asrConfig;
+        }
+        store.autoAiModes = (cfg.auto_ai_modes as string[]) ?? [];
+      }
+    } else {
+      store.showToast(result.error || "Import failed", "error");
+    }
+  } catch {
+    store.showToast("Import failed", "error");
+  } finally {
+    isImporting.value = false;
+    pendingImportPath.value = null;
+  }
+}
+
+function cancelImport() {
+  importConfirmOpen.value = false;
+  pendingImportPath.value = null;
+}
+
 onUnmounted(() => {
   offDownloadProgress();
   offInstallComplete();
@@ -757,7 +852,136 @@ onUnmounted(() => {
         :class="{ 'tab-active': activeTab === 'model-management' }"
         @click="activeTab = 'model-management'"
       >模型管理</a>
+      <a
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'backup' }"
+        @click="activeTab = 'backup'"
+      >备份</a>
     </div>
+
+    <!-- Backup -->
+    <div v-show="activeTab === 'backup'" class="space-y-4">
+      <!-- Export -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">导出备份</h2>
+          <p class="text-sm text-base-content/60 mb-3">
+            将配置、预设、转录记录和音频文件打包导出为 ZIP 文件。导出的备份可在 Windows 和 macOS 之间跨平台使用。
+          </p>
+
+          <div class="space-y-2 mb-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="backupOptions.include_config" class="checkbox checkbox-sm" />
+              <span class="text-sm">应用配置（VAD、引擎设置等）</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="backupOptions.include_presets" class="checkbox checkbox-sm" />
+              <span class="text-sm">AI 预设和处理预设</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="backupOptions.include_records" class="checkbox checkbox-sm" />
+              <span class="text-sm">转录记录（文本和时间戳）</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="backupOptions.include_versions" class="checkbox checkbox-sm" />
+              <span class="text-sm">版本历史</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="backupOptions.include_audio" class="checkbox checkbox-sm" />
+              <span class="text-sm">音频文件（可能较大）</span>
+            </label>
+          </div>
+
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="isExporting"
+            @click="handleExport"
+          >
+            <span v-if="isExporting" class="loading loading-spinner loading-xs"></span>
+            {{ isExporting ? '导出中...' : '导出备份' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Import -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">导入备份</h2>
+          <p class="text-sm text-base-content/60 mb-3">
+            从 ZIP 备份文件恢复数据。导入将覆盖当前的配置、预设和记录。
+          </p>
+
+          <button
+            class="btn btn-outline btn-sm"
+            :disabled="isImporting"
+            @click="handlePickImportFile"
+          >
+            <span v-if="isImporting" class="loading loading-spinner loading-xs"></span>
+            {{ isImporting ? '导入中...' : '选择备份文件' }}
+          </button>
+
+          <!-- Import Result -->
+          <div v-if="importResult" class="mt-4 p-3 bg-base-200 rounded-lg text-sm space-y-1">
+            <p class="font-semibold">导入完成</p>
+            <p>来源平台: {{ importResult.source_platform }}</p>
+            <p>备份时间: {{ importResult.created_at }}</p>
+            <template v-if="importResult.ai_presets !== undefined">
+              <p>AI 预设: {{ importResult.ai_presets }} 个</p>
+            </template>
+            <template v-if="importResult.processing_presets !== undefined">
+              <p>处理预设: {{ importResult.processing_presets }} 个</p>
+            </template>
+            <template v-if="importResult.records !== undefined">
+              <p>转录记录: {{ importResult.records }} 条</p>
+            </template>
+            <template v-if="importResult.versions !== undefined">
+              <p>版本历史: {{ importResult.versions }} 条</p>
+            </template>
+            <template v-if="importResult.audio_files !== undefined">
+              <p>音频文件: {{ importResult.audio_files }} 个</p>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info -->
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body">
+          <h2 class="card-title text-base">说明</h2>
+          <div class="text-sm text-base-content/70 space-y-1">
+            <p>导出的备份文件不包含以下平台相关数据，以确保跨平台兼容性：</p>
+            <ul class="list-disc list-inside space-y-0.5 ml-2">
+              <li>模型文件路径和已选模型</li>
+              <li>ffmpeg / yt-dlp 等工具路径</li>
+              <li>Cookie 文件路径</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import Confirmation Modal -->
+    <dialog
+      class="modal"
+      :class="{ 'modal-open': importConfirmOpen }"
+    >
+      <div class="modal-box">
+        <h3 class="text-lg font-bold">确认导入</h3>
+        <p class="py-4 text-sm">
+          导入备份将覆盖当前的配置、预设和转录记录。此操作不可撤销。
+        </p>
+        <p class="text-sm text-base-content/60">
+          请确保已备份当前数据。
+        </p>
+        <div class="modal-action">
+          <button class="btn btn-ghost btn-sm" @click="cancelImport">取消</button>
+          <button class="btn btn-primary btn-sm" @click="confirmImport">确认导入</button>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop" @click="cancelImport">
+        <button>close</button>
+      </form>
+    </dialog>
 
     <!-- General Settings -->
     <div v-show="activeTab === 'general'" class="space-y-4">

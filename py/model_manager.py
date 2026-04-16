@@ -184,9 +184,17 @@ def download_from_huggingface(
     old_http_proxy = os.environ.get("HTTP_PROXY")
     old_https_proxy = os.environ.get("HTTPS_PROXY")
     old_no_proxy = os.environ.get("NO_PROXY")
+    old_hf_transfer = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
+    old_download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT")
+    old_etag_timeout = os.environ.get("HF_HUB_ETAG_TIMEOUT")
     if proxy_url:
         os.environ["HTTP_PROXY"] = proxy_url
         os.environ["HTTPS_PROXY"] = proxy_url
+    # Disable hf_transfer to avoid XET redirect path that may be unreachable.
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+    # Increase timeouts for large files / slow mirrors (defaults are 10s).
+    os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
+    os.environ["HF_HUB_ETAG_TIMEOUT"] = "30"
 
     try:
         cached_path = hf_hub_download(
@@ -207,6 +215,18 @@ def download_from_huggingface(
                 os.environ["HTTPS_PROXY"] = old_https_proxy
             else:
                 os.environ.pop("HTTPS_PROXY", None)
+        if old_hf_transfer is not None:
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = old_hf_transfer
+        else:
+            os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+        if old_download_timeout is not None:
+            os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = old_download_timeout
+        else:
+            os.environ.pop("HF_HUB_DOWNLOAD_TIMEOUT", None)
+        if old_etag_timeout is not None:
+            os.environ["HF_HUB_ETAG_TIMEOUT"] = old_etag_timeout
+        else:
+            os.environ.pop("HF_HUB_ETAG_TIMEOUT", None)
 
     return dest_path
 
@@ -644,10 +664,18 @@ class ModelInstaller:
         # Proxy setup.
         old_http_proxy = os.environ.get("HTTP_PROXY")
         old_https_proxy = os.environ.get("HTTPS_PROXY")
+        old_hf_transfer = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
+        old_download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT")
+        old_etag_timeout = os.environ.get("HF_HUB_ETAG_TIMEOUT")
         proxy_url = self._proxy_url if self._proxy_mode == "custom" else None
         if proxy_url:
             os.environ["HTTP_PROXY"] = proxy_url
             os.environ["HTTPS_PROXY"] = proxy_url
+        # Disable hf_transfer to avoid XET redirect path that may be unreachable.
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+        # Increase timeouts for large files / slow mirrors (defaults are 10s).
+        os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
+        os.environ["HF_HUB_ETAG_TIMEOUT"] = "30"
 
         try:
             n = len(entry.hf_files)
@@ -677,6 +705,18 @@ class ModelInstaller:
                     os.environ["HTTPS_PROXY"] = old_https_proxy
                 else:
                     os.environ.pop("HTTPS_PROXY", None)
+            if old_hf_transfer is not None:
+                os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = old_hf_transfer
+            else:
+                os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+            if old_download_timeout is not None:
+                os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = old_download_timeout
+            else:
+                os.environ.pop("HF_HUB_DOWNLOAD_TIMEOUT", None)
+            if old_etag_timeout is not None:
+                os.environ["HF_HUB_ETAG_TIMEOUT"] = old_etag_timeout
+            else:
+                os.environ.pop("HF_HUB_ETAG_TIMEOUT", None)
 
         # Validate.
         self._emit_progress("validate", 90)

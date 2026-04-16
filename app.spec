@@ -130,6 +130,7 @@ pyz = PYZ(a.pure)
 # macOS: add microphone permission so WKWebView exposes navigator.mediaDevices
 _DARWIN_INFO_PLIST = {
     "NSMicrophoneUsageDescription": "SherpaNote needs microphone access for speech recognition.",
+    "LSMultipleInstancesProhibited": True,
 }
 
 exe = EXE(

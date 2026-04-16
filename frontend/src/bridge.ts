@@ -165,3 +165,35 @@ export function getDependencyStatus() {
 export function installStaticFfmpeg() {
   return call<{ path: string; source: string }>("install_static_ffmpeg");
 }
+
+// ------------------------------------------------------------------ //
+//  Backup / Restore API helpers                                      //
+// ------------------------------------------------------------------ //
+
+export interface BackupOptions {
+  include_config: boolean;
+  include_presets: boolean;
+  include_records: boolean;
+  include_versions: boolean;
+  include_audio: boolean;
+}
+
+export interface BackupSummary {
+  backup_version: number;
+  source_platform: string;
+  created_at: string;
+  config?: boolean;
+  ai_presets?: number;
+  processing_presets?: number;
+  records?: number;
+  versions?: number;
+  audio_files?: number;
+}
+
+export function exportBackup(path: string, options: BackupOptions) {
+  return call<{ path: string }>("export_backup", path, options);
+}
+
+export function importBackup(path: string) {
+  return call<BackupSummary>("import_backup", path);
+}

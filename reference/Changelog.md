@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.3.2] - 2026-04-16
+
+### New
+
+- Added data backup feature: Allows backing up application settings, presets, transcription history, and audio files in settings
+- Supports selective backup, allowing flexible choice of data types to back up
+- Automatic compatibility with different operating systems after import, enabling cross-platform data transfer
+
+### Fixes
+
+- Fixed the issue where a new window was unexpectedly opened when downloading models on Mac
+- Resolved the problem where leaving the recording interface during AI processing caused results to be lost
+- Fixed incorrect display of Markdown headings and tables
+- Solved timeout and 404 errors that occurred when downloading models from hf-mirror
+
+### Optimizations
+
+- Improved the persistence mechanism for AI processing results to ensure a seamless user experience
+- Enhanced stability and speed of model downloads, reducing failures caused by network issues
+
 ## [1.3.1] - 2026-04-15
 
 ### New
