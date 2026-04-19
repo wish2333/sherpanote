@@ -39,6 +39,15 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Search functionality**: Find records by keywords in title or transcript
 - **Import/Export**: Support for Markdown, TXT, DOCX, and SRT formats
 
+### OCR Image Recognition
+- **Image text recognition**: Extract text from single images, multiple images, and PDF files
+- **Multiple processing modes**: Batch processing (one record per image) and sequential processing (merged into a single record)
+- **PDF support**: Automatic page-to-image conversion and sequential OCR processing
+- **Flexible model selection**: Support for PP-OCRv4 and PP-OCRv5 models with per-component Mobile/Server variants
+- **Built-in model management**: Automatic model download, caching, and lifecycle management via RapidOCR
+- **Real-time progress**: Drag-and-drop file upload with live processing progress display
+- **Offline packaging**: Optional pre-download of OCR models for offline use
+
 ### Model Management
 - **Multi-source download**: GitHub, HuggingFace, HF-Mirror, GitHub Proxy, and ModelScope
 - **Proxy support**: None / System proxy / Custom proxy with configurable settings
@@ -59,6 +68,7 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 ### Backend (Python)
 - **Python 3.10+**: Core application logic
 - **sherpa-onnx**: Local-first speech recognition engine (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
+- **RapidOCR**: Local OCR engine with PP-OCRv4/v5 model support (det/rec/cls per-component configuration)
 - **OpenAI-compatible API**: AI text processing and generation (supports OpenRouter and custom endpoints)
 - **pywebview**: Native desktop window management (via PyWebVue framework)
 - **SQLite (WAL mode)**: Local data persistence with atomic transactions
@@ -121,6 +131,9 @@ uv run build.py --onefile
 # Build with bundled ASR models (directory mode only)
 uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
 
+# Build with pre-downloaded OCR models for offline use (directory mode only)
+uv run build.py --with-ocr-models
+
 # Build with CUDA GPU acceleration (NVIDIA, requires CUDA toolkit + cuDNN)
 uv run build.py --cuda
 uv run build.py --cuda --cuda-variant cuda12.cudnn9  # CUDA 12.x + cuDNN 9
@@ -162,7 +175,6 @@ sherpanote/
 │   │   │   ├── AiProcessor.vue       # AI processing control panel
 │   │   │   ├── AudioRecorder.vue     # Microphone recording with silence detection
 │   │   │   ├── ExportMenu.vue        # Multi-format export dropdown
-│   │   │   ├── RecordCard.vue        # Record list item
 │   │   │   ├── SearchBar.vue         # Keyword search and filter
 │   │   │   ├── TranscriptPanel.vue   # Transcript display and editing
 │   │   │   ├── VersionHistory.vue    # Version list with restore/delete
@@ -173,7 +185,8 @@ sherpanote/
 │   │   │   ├── HomeView.vue          # Record list with search/filter
 │   │   │   ├── RecordView.vue        # Recording and file transcription
 │   │   │   ├── EditorView.vue        # Transcript editing + AI processing
-│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR tabs)
+│   │   │   ├── OcrView.vue           # OCR image recognition (drag-drop, batch/sequential)
+│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR, OCR tabs)
 │   │   │   └── AudioManageView.vue   # Audio file management
 │   │   ├── composables/
 │   │   │   ├── useRecording.ts       # Audio capture, resampling, silence detection
@@ -195,6 +208,7 @@ sherpanote/
 │   ├── presets.py             # AI API preset management
 │   ├── processing_presets.py  # AI processing template management
 │   ├── gpu_detect.py          # NVIDIA CUDA detection and verification
+│   ├── ocr.py                 # OCR engine (RapidOCR wrapper, PDF conversion)
 │   ├── whispercpp.py          # Whisper.cpp ASR backend integration
 │   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
@@ -220,7 +234,28 @@ Configuration can be modified through the **Settings** interface.
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
 
-[2026-04-16 - Stability Improvements and Backup Functionality]
+[2026-04-20 - OCR Image Recognition]
+
+### New
+
+- Brand-new OCR image recognition feature: Supports text recognition for images, multiple images, and PDF files
+- New OCR dedicated view interface for drag-and-drop file uploads and real-time processing progress display
+- OCR settings page with flexible selection of different model versions (v4/v5) and types (Mobile/Server)
+- Support for two processing modes: Batch processing (generates a separate record for each image) and Sequential processing (merges into a single record)
+- Built-in model management: Automatic model download, caching, and lifecycle management via RapidOCR
+- Optional pre-download of OCR models during packaging for offline use
+
+### Fixes
+
+- Fixed OCR model selection and result parsing errors
+- Resolved model download and management issues
+- Fixed the issue of incomplete display in the front-end settings interface
+
+### Optimizations
+
+- Refactored the OCR model management system to use RapidOCR's built-in automatic download and management
+- Packaging optimization: Added an option for pre-downloading OCR models to enhance the offline user experience
+- Streamlined OCR settings by removing unnecessary parameter configurations
 
 ### ✨ New
 
@@ -271,6 +306,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Next-generation speech recognition toolkit
+- **[RapidOCR](https://github.com/RapidAI/RapidOCR)**: Awesome OCR multiple programing languages toolkits
 - **[pywebview](https://github.com/r0x0r/pywebview)**: Cross-platform native GUI library
 - **[PyWebVue](https://github.com/nicepkg/pywebvue)**: Vue + pywebview desktop framework
 - **[Vue.js](https://vuejs.org/)**: Progressive JavaScript framework

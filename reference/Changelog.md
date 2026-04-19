@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [2.0.0] - 2026-04-20
+
+### New
+- Brand-new OCR image recognition feature: Supports text recognition for images, multiple images, and PDF files
+- New OCR dedicated view interface for drag-and-drop file uploads and real-time processing progress display
+- OCR settings page with flexible selection of different model versions (v4/v5) and types (Mobile/Server)
+- Support for two processing modes: Batch processing (generates a separate record for each image) and Sequential processing (merges into a single record)
+
+### Fixes
+- Fixed OCR model selection and result parsing errors
+- Resolved model download and management issues
+- Fixed the issue of incomplete display in the front-end settings interface
+
+### Optimizations
+- Refactored the OCR model management system to use RapidOCR's built-in automatic download and management
+- Packaging optimization: Added an option for pre-downloading OCR models to enhance the offline user experience
+- Streamlined OCR settings by removing unnecessary parameter configurations
+
 ## [1.3.2] - 2026-04-16
 
 ### New
