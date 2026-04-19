@@ -75,6 +75,27 @@ hiddenimports = [
     "py.model_manager",
     "py.model_registry",
     "py.gpu_detect",
+    "py.ocr",
+    # rapidocr - lazy imported by py/ocr.py, PyInstaller can't detect them
+    "rapidocr",
+    "rapidocr.main",
+    "rapidocr.config",
+    "rapidocr.inference_engine",
+    "rapidocr.inference_engine.main",
+    "rapidocr.inference_engine.onnxruntime",
+    "rapidocr.utils",
+    "rapidocr.utils.download_models",
+    "rapidocr.utils.load_image",
+    "rapidocr.ch_ppocr_det",
+    "rapidocr.ch_ppocr_rec",
+    "rapidocr.ch_ppocr_cls",
+    "rapidocr.cal_rec_boxes",
+    # rapidocr transitive deps
+    "onnxruntime",
+    "shapely",
+    "fitz",
+    # rapidocr brings in cv2 (opencv-python-headless)
+    "cv2",
 ]
 
 
@@ -117,6 +138,19 @@ _dlls = list(_lib.glob("*.dll"))
 print(f"[DEBUG] sherpa_onnx lib={_lib}, DLLs={[f.name for f in _dlls]}")
 for _f in _dlls:
     a.binaries.append((str(_Path("sherpa_onnx") / "lib" / _f.name), str(_f), "BINARY"))
+
+# rapidocr: collect config YAML and default model files.
+# These are data files that PyInstaller doesn't auto-detect.
+import rapidocr as _ro  # noqa: E402
+_ro_pkg = _Path(_ro.__file__).parent
+# config.yaml and default_models.yaml are needed for model resolution
+for _cfg_name in ("config.yaml", "default_models.yaml"):
+    _cfg_path = _ro_pkg / _cfg_name
+    if _cfg_path.exists():
+        a.datas.append((str(_Path("rapidocr") / _cfg_name), str(_cfg_path), "DATA"))
+
+# cv2 data files (haarcascades, etc.) are collected automatically
+# by PyInstaller through hiddenimports — no manual collection needed.
 
 if sys.platform == "win32":
     a.excludes += EXCLUDES_WIN32

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { TranscriptRecord, AiConfig, AsrConfig } from "../types";
+import type { TranscriptRecord, AiConfig, AsrConfig, OcrConfig } from "../types";
 
 /** A single toast notification entry. */
 export interface Toast {
@@ -82,6 +82,16 @@ export const useAppStore = defineStore("app", () => {
     ffmpeg_path: "",
   });
 
+  /* ---- OCR config ---- */
+  const ocrConfig = ref<OcrConfig>({
+    det_model_version: "v5",
+    det_model_type: "mobile",
+    rec_model_version: "v5",
+    rec_model_type: "mobile",
+    cls_model_version: "v5",
+    cls_model_type: "server",
+  });
+
   /* ---- toast notifications ---- */
   const toasts = ref<Toast[]>([]);
 
@@ -110,6 +120,7 @@ export const useAppStore = defineStore("app", () => {
     isAiProcessing,
     aiConfig,
     asrConfig,
+    ocrConfig,
     autoAiModes,
     toasts,
     showToast,

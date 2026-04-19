@@ -30,6 +30,11 @@ const router = createRouter({
       name: "audio",
       component: () => import("../views/AudioManageView.vue"),
     },
+    {
+      path: "/ocr",
+      name: "ocr",
+      component: () => import("../views/OcrView.vue"),
+    },
   ],
 });
 

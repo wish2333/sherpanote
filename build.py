@@ -159,6 +159,7 @@ def _clean() -> None:
 def _build_onedir(
     bundled_model_dirs: list[tuple[str, str]] | None = None,
     cuda_venv_python: Path | None = None,
+    ocr_model_datas: list[tuple[str, str]] | None = None,
 ) -> None:
     """Build desktop app as a directory (uses app.spec directly)."""
     spec = PROJECT_ROOT / "app.spec"
@@ -168,10 +169,17 @@ def _build_onedir(
             "Make sure app.spec exists in the project root."
         )
 
-    # If models are being bundled, generate a temporary spec with extra datas.
+    # Collect all extra datas that need injection into the spec.
+    extra_datas: list[tuple[str, str]] = []
     if bundled_model_dirs:
         _info(f"Bundling {len(bundled_model_dirs)} model(s) into onedir build")
-        spec = _inject_model_datas(spec, bundled_model_dirs)
+        extra_datas.extend(bundled_model_dirs)
+    if ocr_model_datas:
+        _info(f"Bundling {len(ocr_model_datas)} OCR model file(s) into onedir build")
+        extra_datas.extend(ocr_model_datas)
+
+    if extra_datas:
+        spec = _inject_model_datas(spec, extra_datas)
 
     # For CUDA builds, use the isolated CUDA venv.
     # For normal builds, use the project .venv.
@@ -203,20 +211,22 @@ def _inject_model_datas(
     """Create a temporary app.spec with additional model datas injected."""
     content = original_spec.read_text(encoding="utf-8")
 
-    # Find the datas = [...] block and append model entries.
+    # Build the extra data lines to insert.
     model_lines = "\n".join(
         f'    (r"{path}", "{dest}"),'
         for path, dest in model_dirs
     )
 
-    # Insert before the closing bracket of datas = [...]
-    import re
-    content = re.sub(
-        r"(datas\s*=\s*\[)",
-        f"\\1\n{model_lines}",
-        content,
-        count=1,
-    )
+    # Insert model entries after "datas = [" — use string find, not regex,
+    # to avoid backslash escaping issues with Windows paths.
+    # Match only the uncommented line (not inside # comment blocks).
+    marker = "\ndatas = ["
+    idx = content.find(marker)
+    if idx == -1:
+        _error("Could not find 'datas = [' in spec file")
+    idx += 1  # skip the leading \n
+    insert_pos = idx + len(marker)
+    content = content[:insert_pos] + "\n" + model_lines + content[insert_pos:]
 
     tmp_spec = PROJECT_ROOT / "_build_onedir_with_models.spec"
     tmp_spec.write_text(content, encoding="utf-8")
@@ -569,6 +579,7 @@ examples:
     uv run build.py --with-models model-a,model-b      Bundle models with onedir
     uv run build.py --cuda                             CUDA GPU build (CUDA 11.8)
     uv run build.py --cuda --cuda-variant cuda12.cudnn9  CUDA 12.8 + cuDNN 9
+    uv run build.py --with-ocr-models                  Bundle default OCR models (onedir)
     uv run build.py --android                          Android APK (macOS / Linux)
     uv run build.py --clean                            Remove build artifacts
 
@@ -594,6 +605,10 @@ configuration:
                         metavar="VARIANT",
                         help="CUDA variant: 'cuda' (CUDA 11.8, default) or "
                              "'cuda12.cudnn9' (CUDA 12.8 + cuDNN 9)")
+    parser.add_argument("--with-ocr-models", action="store_true",
+                        help="Bundle default OCR models (onedir only). "
+                             "Downloads v5/mobile det, v5/mobile rec, "
+                             "v5/server cls into the package.")
     args = parser.parse_args()
 
     if args.clean:
@@ -610,6 +625,10 @@ configuration:
         _error("--with-models is not compatible with --onefile mode. "
                "Models are too large for single-exe distribution.")
 
+    if args.with_ocr_models and args.onefile:
+        _error("--with-ocr-models is not compatible with --onefile mode. "
+               "OCR models are too large for single-exe distribution.")
+
     _build_frontend()
 
     # Download models if requested.
@@ -618,7 +637,18 @@ configuration:
         model_ids = [m.strip() for m in args.with_models.split(",")]
         bundled_model_dirs = _download_build_models(model_ids)
 
-    _build_desktop(onefile=args.onefile, bundled_model_dirs=bundled_model_dirs, cuda=args.cuda, cuda_variant=args.cuda_variant)
+    # Download OCR models if requested.
+    ocr_model_datas: list[tuple[str, str]] = []
+    if args.with_ocr_models:
+        ocr_model_datas = _download_ocr_models()
+
+    _build_desktop(
+        onefile=args.onefile,
+        bundled_model_dirs=bundled_model_dirs,
+        cuda=args.cuda,
+        cuda_variant=args.cuda_variant,
+        ocr_model_datas=ocr_model_datas,
+    )
 
 
 # ========== frontend build ==========
@@ -655,6 +685,7 @@ def _build_desktop(
     bundled_model_dirs: list[tuple[str, str]] | None = None,
     cuda: bool = False,
     cuda_variant: str = "cuda",
+    ocr_model_datas: list[tuple[str, str]] | None = None,
 ) -> None:
     cuda_venv_python = None
     if cuda:
@@ -664,11 +695,90 @@ def _build_desktop(
         if onefile:
             _build_onefile(cuda_venv_python=cuda_venv_python)
         else:
-            _build_onedir(bundled_model_dirs=bundled_model_dirs, cuda_venv_python=cuda_venv_python)
+            _build_onedir(
+                bundled_model_dirs=bundled_model_dirs,
+                cuda_venv_python=cuda_venv_python,
+                ocr_model_datas=ocr_model_datas,
+            )
     finally:
         if cuda_venv_python is not None:
             _info(f"CUDA build venv kept at: {_CUDA_BUILD_VENV}")
             _info(f"(delete manually with: rmdir /s /q {_CUDA_BUILD_VENV})")
+
+
+# ========== OCR model bundling ==========
+
+def _download_ocr_models() -> list[tuple[str, str]]:
+    """Download default OCR models and return datas list for PyInstaller.
+
+    Downloads the same default set as OcrConfig:
+      - det: v5/mobile  (ch_PP-OCRv5_det_mobile.onnx)
+      - rec: v5/mobile  (ch_PP-OCRv5_rec_mobile.onnx)
+      - cls: v5/server  (ch_PP-LCNet_x1_0_textline_ori_cls_server.onnx)
+
+    Also bundles dict files (ppocr_keys_v1.txt, ppocrv5_dict.txt) so
+    RapidOCR can find character mappings at runtime.
+
+    Returns:
+        List of (model_file_path, "rapidocr/models") tuples for PyInstaller datas.
+    """
+    _info("[ocr-models] Downloading default OCR models via RapidOCR...")
+    _ensure_pyinstaller_in_venv()
+    py = _venv_python()
+
+    # Use a small script to trigger RapidOCR auto-download.
+    download_script = PROJECT_ROOT / "_tmp_download_ocr.py"
+    download_script.write_text(
+        "from rapidocr import ModelType, OCRVersion, RapidOCR\n"
+        "from rapidocr.main import root_dir\n"
+        "import json\n"
+        "model_dir = root_dir / 'models'\n"
+        "RapidOCR(params={\n"
+        "    'Global.model_root_dir': str(model_dir),\n"
+        "    'Det.ocr_version': OCRVersion.PPOCRV5,\n"
+        "    'Det.model_type': ModelType.MOBILE,\n"
+        "    'Rec.ocr_version': OCRVersion.PPOCRV5,\n"
+        "    'Rec.model_type': ModelType.MOBILE,\n"
+        "    'Cls.ocr_version': OCRVersion.PPOCRV5,\n"
+        "    'Cls.model_type': ModelType.SERVER,\n"
+        "})\n"
+        "# Collect all files in the models directory\n"
+        "files = sorted(str(f) for f in model_dir.iterdir() if f.is_file())\n"
+        "print(json.dumps(files))\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [str(py), str(download_script)],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+    )
+    download_script.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        _error(f"OCR model download failed:\n{result.stderr}")
+
+    import json
+    model_files = json.loads(result.stdout.strip().split("\n")[-1])
+
+    # Filter to the specific default model files we want.
+    target_files = {
+        "ch_PP-OCRv5_det_mobile.onnx",
+        "ch_PP-OCRv5_rec_mobile.onnx",
+        "ch_PP-LCNet_x1_0_textline_ori_cls_server.onnx",
+        "ppocr_keys_v1.txt",
+        "ppocrv5_dict.txt",
+    }
+
+    datas: list[tuple[str, str]] = []
+    for fpath in model_files:
+        fname = Path(fpath).name
+        if fname in target_files:
+            size_mb = Path(fpath).stat().st_size / (1024 * 1024)
+            _info(f"  [ocr-models] {fname} ({size_mb:.1f} MB)")
+            datas.append((fpath, "rapidocr/models"))
+
+    _info(f"[ocr-models] {len(datas)} file(s) ready for bundling")
+    return datas
 
 
 # ========== model bundling ==========

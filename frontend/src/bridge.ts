@@ -1,5 +1,5 @@
 /** Core bridge functions for communicating with the Python backend. */
-import type { GpuStatus, WhisperBinaryStatus, ModelEntry, InstalledModel, DependencyStatus } from "./types";
+import type { GpuStatus, WhisperBinaryStatus, ModelEntry, InstalledModel, DependencyStatus, OcrModelFileInfo } from "./types";
 
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -196,4 +196,43 @@ export function exportBackup(path: string, options: BackupOptions) {
 
 export function importBackup(path: string) {
   return call<BackupSummary>("import_backup", path);
+}
+
+// ------------------------------------------------------------------ //
+//  OCR API helpers                                                    //
+// ------------------------------------------------------------------ //
+
+export function pickImageFiles() {
+  return call<string[]>("pick_image_files");
+}
+
+export function ocrProcess(files: string[], mode: string, title?: string) {
+  return call<{ status: string }>("ocr_process", files, mode, title ?? null);
+}
+
+export function cancelOcr() {
+  return call<{ status: string }>("cancel_ocr");
+}
+
+export function getImagePreview(path: string) {
+  return call<{ base64: string; mime: string }>("get_image_preview", path);
+}
+
+export function scanOcrModels() {
+  return call<OcrModelFileInfo[]>("scan_ocr_models");
+}
+
+export function downloadOcrModels(
+  det_model_version: string,
+  det_model_type: string,
+  rec_model_version: string,
+  rec_model_type: string,
+  cls_model_version: string,
+  cls_model_type: string,
+) {
+  return call("download_ocr_models", det_model_version, det_model_type, rec_model_version, rec_model_type, cls_model_version, cls_model_type);
+}
+
+export function deleteOcrModel(version: string, role: string, model_type: string) {
+  return call("delete_ocr_model", version, role, model_type);
 }

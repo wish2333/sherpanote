@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,9 @@ from py import model_manager as _mm
 from py import model_registry as _mr
 from py.video_downloader import VideoDownloadConfig, download_audio
 from py import backup as _backup
+# OCR imports are lazy to avoid onnxruntime DLL conflicts with pywebview/WebView2 on Windows.
+# OCR imports are lazy to avoid onnxruntime DLL conflicts with pywebview/WebView2 on Windows.
+# OcrEngine and check_model_availability are imported inside methods that use them.
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,8 @@ class SherpaNoteAPI(Bridge):
         self._asr: SherpaASR | None = None
         self._whisper_asr: "WhisperCppASR | None" = None
         self._ai: AIProcessor | None = None
+        self._ocr_engine: OcrEngine | None = None
+        self._ocr_cancel_event = threading.Event()
         self._preset_store = AiPresetStore()
         self._processing_preset_store = ProcessingPresetStore()
         self._model_installer = _mm.ModelInstaller(
@@ -1590,6 +1596,8 @@ class SherpaNoteAPI(Bridge):
         self._ai = None
         # Re-create ASR if model_dir changed.
         self._asr = None
+        # Re-create OCR engine if config changed.
+        self._ocr_engine = None
         return {"success": True, "data": self._config.to_dict()}
 
     # ---- Backup / Restore ----
@@ -1623,6 +1631,276 @@ class SherpaNoteAPI(Bridge):
             return {"success": True, "data": summary}
         except Exception as e:
             logger.exception("import_backup failed")
+            return {"success": False, "error": str(e)}
+
+    # ---- OCR ----
+
+    def _get_ocr(self) -> "OcrEngine":
+        """Lazy-initialize the OCR engine."""
+        if self._ocr_engine is None:
+            from py.ocr import OcrEngine
+
+            ocr_config = self._config.ocr
+            self._ocr_engine = OcrEngine(
+                det_model_version=ocr_config.det_model_version,
+                det_model_type=ocr_config.det_model_type,
+                rec_model_version=ocr_config.rec_model_version,
+                rec_model_type=ocr_config.rec_model_type,
+                cls_model_version=ocr_config.cls_model_version,
+                cls_model_type=ocr_config.cls_model_type,
+            )
+        return self._ocr_engine
+
+    @expose
+    def ocr_process(self, files: list[str], mode: str = "single", title: str | None = None) -> dict:
+        """Run OCR on image/PDF files and create record(s).
+
+        Args:
+            files: list of file paths (images or PDFs).
+            mode: "single" (one file -> one record), "batch" (each file -> separate record),
+                  "sequential" (all combined into one record).
+            title: optional title for the resulting record(s).
+
+        Runs in a background thread. Emits progress via 'ocr_progress'.
+        Completion via 'ocr_complete' with created record data.
+        """
+        if not files:
+            return {"success": False, "error": "No files provided"}
+
+        self._ocr_cancel_event.clear()
+        logger.info("OCR process started: %d files, mode=%s", len(files), mode)
+
+        def _work() -> None:
+            try:
+                engine = self._get_ocr()
+
+                # Expand PDFs to images and build the final image list.
+                image_entries: list[tuple[str, str]] = []  # (image_path, source_name)
+                temp_dirs: list[str] = []
+
+                for f in files:
+                    if self._ocr_cancel_event.is_set():
+                        self._emit("ocr_complete", {"status": "cancelled", "records": []})
+                        return
+
+                    from py.ocr import OcrEngine as _OcrEngine
+
+                    if _OcrEngine.is_pdf(f):
+                        tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
+                        temp_dirs.append(tmp)
+                        pages = _OcrEngine.pdf_to_images(f, output_dir=tmp)
+                        for p in pages:
+                            image_entries.append((p, Path(f).stem))
+                    else:
+                        image_entries.append((f, Path(f).stem))
+
+                if not image_entries:
+                    self._emit("ocr_complete", {"status": "error", "error": "No images to process"})
+                    return
+
+                image_paths = [e[0] for e in image_entries]
+
+                def on_progress(current: int, total: int) -> None:
+                    self._emit("ocr_progress", {
+                        "status": "processing",
+                        "current": current,
+                        "total": total,
+                        "percent": int(100 * current / total) if total > 0 else 0,
+                    })
+
+                if mode == "batch":
+                    # Each image/file produces a separate record.
+                    all_results = engine.process_images_batch(image_paths, on_progress=on_progress)
+                    created_records: list[dict] = []
+
+                    for idx, (results, (_, source_name)) in enumerate(zip(all_results, image_entries)):
+                        if self._ocr_cancel_event.is_set():
+                            break
+                        text = "\n".join(r.text for r in results if r.text.strip())
+                        segments = [
+                            {
+                                "index": i,
+                                "text": r.text,
+                                "start_time": 0.0,
+                                "end_time": 0.0,
+                                "speaker": None,
+                                "is_final": True,
+                            }
+                            for i, r in enumerate(results) if r.text.strip()
+                        ]
+                        record_title = title or source_name if mode == "batch" else (title or "OCR")
+                        if mode == "batch":
+                            record_title = f"{record_title}" if len(image_entries) == 1 else f"{source_name}_{idx + 1}"
+                        if len(created_records) > 0:
+                            record_title = f"{title or source_name}_{idx + 1}"
+
+                        record = self._storage.save({
+                            "title": record_title,
+                            "audio_path": None,
+                            "transcript": text,
+                            "segments": segments,
+                        })
+                        record = self._annotate_record(record)
+                        created_records.append(record)
+
+                    self._emit("ocr_complete", {"status": "done", "records": created_records})
+
+                else:
+                    # Single or sequential: all images combined into one record.
+                    all_results = engine.process_images_sequential(image_paths, on_progress=on_progress)
+                    text = "\n".join(r.text for r in all_results if r.text.strip())
+                    segments = [
+                        {
+                            "index": i,
+                            "text": r.text,
+                            "start_time": 0.0,
+                            "end_time": 0.0,
+                            "speaker": None,
+                            "is_final": True,
+                        }
+                        for i, r in enumerate(all_results) if r.text.strip()
+                    ]
+                    record = self._storage.save({
+                        "title": title or "OCR",
+                        "audio_path": None,
+                        "transcript": text,
+                        "segments": segments,
+                    })
+                    record = self._annotate_record(record)
+                    record = self._auto_process_record(record)
+                    self._emit("ocr_complete", {"status": "done", "records": [record]})
+
+                # Cleanup temp PDF images.
+                for tmp_dir in temp_dirs:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+            except Exception as exc:
+                logger.exception("OCR processing failed")
+                self._emit("ocr_complete", {"status": "error", "error": str(exc)})
+
+        thread = threading.Thread(target=_work, daemon=True)
+        thread.start()
+        return {"success": True, "data": {"status": "started"}}
+
+    @expose
+    def cancel_ocr(self) -> dict:
+        """Cancel the current OCR processing."""
+        self._ocr_cancel_event.set()
+        return {"success": True, "data": {"status": "cancelled"}}
+
+    @expose
+    def pick_image_files(self) -> dict:
+        """Open a native file picker for image/PDF files."""
+        try:
+            import webview
+            from py.ocr import OcrEngine as _OcrEngine
+
+            file_types = _OcrEngine.supported_image_extensions()
+            try:
+                dialog_type = webview.FileDialog.OPEN
+            except AttributeError:
+                dialog_type = webview.OPEN_DIALOG
+            result = self._window.create_file_dialog(
+                dialog_type=dialog_type,
+                file_types=file_types,
+                allows_multiple_selection=True,
+            )
+            if result:
+                return {"success": True, "data": result}
+            return {"success": False, "error": "No file selected"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def scan_ocr_models(self) -> dict:
+        """Scan and report which OCR model files are downloaded."""
+        from py.ocr import scan_downloaded_models
+
+        models = scan_downloaded_models()
+        return {"success": True, "data": models}
+
+    @expose
+    def download_ocr_models(
+        self,
+        det_model_version: str = "v5",
+        det_model_type: str = "mobile",
+        rec_model_version: str = "v5",
+        rec_model_type: str = "mobile",
+        cls_model_version: str = "v5",
+        cls_model_type: str = "server",
+    ) -> dict:
+        """Trigger RapidOCR auto-download for specified model variants.
+
+        Runs in a background thread. Emits 'ocr_model_download_complete' or 'ocr_model_download_error'.
+        """
+        def _work() -> None:
+            from py.ocr import download_ocr_models as _download
+
+            result = _download(
+                det_model_version=det_model_version,
+                det_model_type=det_model_type,
+                rec_model_version=rec_model_version,
+                rec_model_type=rec_model_type,
+                cls_model_version=cls_model_version,
+                cls_model_type=cls_model_type,
+            )
+            if result.get("success"):
+                self._emit("ocr_model_download_complete", result)
+            else:
+                self._emit("ocr_model_download_error", result)
+
+        threading.Thread(target=_work, daemon=True).start()
+        return {"success": True, "data": {"status": "downloading"}}
+
+    @expose
+    def delete_ocr_model(self, version: str, role: str, model_type: str) -> dict:
+        """Delete a specific OCR model file."""
+        from py.ocr import delete_model_file
+
+        return delete_model_file(version, role, model_type)
+
+    @expose
+    def get_image_preview(self, file_path: str) -> dict:
+        """Read an image file and return base64-encoded content with MIME type.
+
+        For PDFs, returns the first page as an image preview.
+        """
+        from py.ocr import OcrEngine as _OcrEngine
+
+        p = Path(file_path).resolve()
+        # Allow any local file (not restricted to data dir) since these are user-selected files.
+        if not p.exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        max_size = 20 * 1024 * 1024  # 20 MB
+        if p.stat().st_size > max_size:
+            return {"success": False, "error": "File too large for preview"}
+
+        import base64 as _base64
+        import mimetypes
+
+        if _OcrEngine.is_pdf(str(p)):
+            # Render first page as image for preview.
+            try:
+                pages = _OcrEngine.pdf_to_images(str(p), dpi=72)
+                if not pages:
+                    return {"success": False, "error": "PDF has no pages"}
+                preview_path = Path(pages[0])
+                data = preview_path.read_bytes()
+                shutil.rmtree(str(preview_path.parent), ignore_errors=True)
+                return {"success": True, "data": {"base64": _base64.b64encode(data).decode("ascii"), "mime": "image/png"}}
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
+
+        mime, _ = mimetypes.guess_type(str(p))
+        if mime is None:
+            mime = "image/png"
+
+        try:
+            data = p.read_bytes()
+            b64 = _base64.b64encode(data).decode("ascii")
+            return {"success": True, "data": {"base64": b64, "mime": mime}}
+        except Exception as e:
             return {"success": False, "error": str(e)}
 
     # ---- Utilities ----
