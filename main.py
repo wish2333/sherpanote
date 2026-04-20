@@ -1799,12 +1799,18 @@ class SherpaNoteAPI(Bridge):
             try:
                 dialog_type = webview.FileDialog.OPEN
             except AttributeError:
-                dialog_type = webview.OPEN_DIALOG
-            result = self._window.create_file_dialog(
-                dialog_type=dialog_type,
-                file_types=file_types,
-                allows_multiple_selection=True,
-            )
+                dialog_type = webview.OPEN_DIALOG  # fallback for older versions
+            try:
+                result = self._window.create_file_dialog(
+                    dialog_type=dialog_type,
+                    file_types=file_types,
+                    allows_multiple_selection=True,
+                )
+            except TypeError:
+                result = self._window.create_file_dialog(
+                    dialog_type=dialog_type,
+                    file_types=file_types,
+                )
             if result:
                 return {"success": True, "data": result}
             return {"success": False, "error": "No file selected"}

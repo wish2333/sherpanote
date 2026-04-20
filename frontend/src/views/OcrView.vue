@@ -61,11 +61,21 @@ async function addFileEntry(p: string) {
 }
 
 async function addFiles() {
-  const res = await pickImageFiles();
-  if (!res.success || !res.data) return;
-  const newPaths = res.data as string[];
-  for (const p of newPaths) {
-    await addFileEntry(p);
+  try {
+    const res = await pickImageFiles();
+    if (!res.success || !res.data) {
+      if (res.error) store.showToast(`选择文件失败: ${res.error}`, "error");
+      return;
+    }
+    const newPaths = res.data as string[];
+    let added = 0;
+    for (const p of newPaths) {
+      await addFileEntry(p);
+      added++;
+    }
+    if (added > 0) store.showToast(`已添加 ${added} 个文件`, "success");
+  } catch (e: any) {
+    store.showToast(`选择文件失败: ${e?.message ?? e}`, "error");
   }
 }
 
