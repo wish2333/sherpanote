@@ -51,3 +51,64 @@ fix(ocr): 修复添加按钮点击无效问题
 - 修复OCR界面添加按钮点击无响应问题
 - 修复模型目录浏览后不立即刷新的界面问题
 ```
+
+## dev-2.0.1-pre2
+
+### Feature
+
+- 优化OCR记录的命名：为“OCR-{单个文件名}”或“OCR-{PDF文件名}”或“OCR-{多个文件连续处理中第一个文件名}”
+
+### summary of changes:
+
+```
+Modified: main.py - ocr_process method title logic
+     
+New naming behavior (when user doesn't provide custom title):
+     
+┌───────────────────────────────────┬─────────────────────────┬────────────────────────┐
+       │             Scenario              │        Old Name         │        New Name        │
+       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+       │ Single image                      │ filename                │ OCR-filename           │
+       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+       │ Single PDF (multi-page)           │ pdfname (per page)      │ OCR-pdfname (per page) │
+       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+       │ Batch, multiple files, 1st file   │ filename_1 / filename   │ OCR-first_filename     │
+       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+       │ Batch, multiple files, subsequent │ filename_2 / filename_3 │ OCR-each_filename      │
+       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+       │ Single/Sequential mode            │ OCR                     │ OCR-first_filename     │
+       └───────────────────────────────────┴─────────────────────────┴────────────────────────┘
+     
+If the user provides a custom title in the input field, it continues to use that title directly.
+     
+Manual test cases:
+     
+1. Drop a single image (e.g., receipt.jpg) in batch mode -> record title should be OCR-receipt
+2. Drop a PDF (e.g., report.pdf) in batch mode -> each page record titled OCR-report
+3. Drop multiple images in batch mode without custom title -> first record OCR-first_image, rest OCR-each_image
+4. Drop a single image in single mode -> record title OCR-imagename
+5. Drop files with custom title "My Title" -> all records use My Title as before
+```
+
+### 📝 Commit Message
+
+```
+feat(ocr): 优化OCR记录命名规则添加OCR前缀
+
+- 更新OCR记录命名逻辑，自动添加"OCR-"前缀
+- 支持单文件、PDF和多文件批处理的统一命名规范
+- 保留用户自定义标题功能不变
+```
+
+### 🚀 Release Notes
+
+```
+## 2025-06-17 - OCR记录命名优化
+
+### ✨ 新增
+- OCR记录现在自动添加"OCR-"前缀，提高文件识别度
+- 统一了单文件、PDF和多文件批处理的命名规则，使记录更易识别
+
+### 💡 改进
+- 保留了您自定义标题的功能，如之前输入标题仍将直接使用
+```
