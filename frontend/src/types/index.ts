@@ -17,10 +17,7 @@ export interface Segment {
 
 /** AI processing result keyed by mode name. */
 export interface AiResults {
-  polish?: string;
-  note?: string;
-  mindmap?: string;
-  brainstorm?: string;
+  [mode: string]: string | undefined;
 }
 
 /** A complete transcription record (immutable -- create new objects to update). */
@@ -96,6 +93,7 @@ export interface AsrConfig {
   asr_backend: string;
   active_streaming_model: string;
   active_offline_model: string;
+  active_whisper_model: string;
   auto_punctuate: boolean;
   download_source: string;
   custom_ghproxy_domain: string | null;
@@ -112,10 +110,43 @@ export interface AsrConfig {
   ffmpeg_path: string;
 }
 
+/** OCR engine configuration. Each role independently picks version and type. */
+export interface OcrConfig {
+  det_model_version: "v4" | "v5";
+  det_model_type: "mobile" | "server";
+  rec_model_version: "v4" | "v5";
+  rec_model_type: "mobile" | "server";
+  cls_model_version: "v4" | "v5";
+  cls_model_type: "mobile" | "server";
+}
+
+/** OCR model file info from scan. */
+export interface OcrModelFileInfo {
+  version: string;
+  role: "det" | "rec" | "cls";
+  model_type: "mobile" | "server";
+  filename: string;
+  size_mb: number;
+  downloaded: boolean;
+}
+
+/** OCR processing mode. */
+export type OcrMode = "single" | "batch" | "sequential";
+
+/** File entry in OCR upload list. */
+export interface OcrFileEntry {
+  path: string;
+  name: string;
+  type: "image" | "pdf";
+  size_mb: number;
+  page_count?: number;
+}
+
 /** App settings bundle. */
 export interface AppSettings {
   ai: AiConfig;
   asr: AsrConfig;
+  ocr: OcrConfig;
   auto_ai_modes: string[];
   max_tokens_mode: string;
 }
@@ -183,6 +214,8 @@ export interface WhisperBinaryStatus {
   platform: string;
   available_variants: string[];
   default_variant: string | null;
+  current_variant?: string | null;
+  installed_variants?: string[];
   source?: string;
 }
 

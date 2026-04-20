@@ -10,10 +10,10 @@
 |------|------|
 | 产品名称 | SherpaNote（雪豹笔记） |
 | 产品定位 | 面向学生、研究者、职场人士的本地优先 AI 语音学习助手 |
-| 核心价值 | 隐私安全（本地ASR）、跨平台（Win/Mac）、从音频到结构化知识的一站式工作流 |
-| 技术栈 | PyWebVue (Vue 3 + pywebview) + DaisyUI 5 + Tailwind CSS 4 + sherpa-onnx + SQLite + OpenAI API |
-| 开发周期 | 2026-04-06 ~ 2026-04-15（3天核心开发 + 持续迭代） |
-| 代码规模 | ~12,000+ 行（前端 + 后端），持续迭代中 |
+| 核心价值 | 隐私安全（本地ASR/OCR）、跨平台（Win/Mac）、从音频/图片到结构化知识的一站式工作流 |
+| 技术栈 | PyWebVue (Vue 3 + pywebview) + DaisyUI 5 + Tailwind CSS 4 + sherpa-onnx + RapidOCR + SQLite + OpenAI API |
+| 开发周期 | 2026-04-06 ~ 2026-04-20（3天核心开发 + 持续迭代） |
+| 代码规模 | ~15,000+ 行（前端 + 后端），持续迭代中 |
 | 角色定位 | 独立负责产品设计、架构设计、全栈开发 |
 
 ---
@@ -206,6 +206,7 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 |------|------|------|
 | 桌面框架 | PyWebVue (pywebview) vs Electron | 包体小 5x+，Python 原生调用无 IPC 开销 |
 | ASR 引擎 | sherpa-onnx | 本地运行、模型丰富、支持流式/离线、社区活跃 |
+| OCR 引擎 | RapidOCR | 本地运行、内置模型管理、PP-OCRv4/v5 生态丰富、组件级配置灵活 |
 | UI 框架 | DaisyUI 5 + Tailwind CSS 4 | 组件丰富、主题灵活、开发效率高 |
 | 数据库 | SQLite WAL 模式 | 零配置、事务安全、并发读性能好 |
 | 前后端通信 | @expose + _emit 事件驱动 | PyWebVue 原生机制，无需 WebSocket |
@@ -213,6 +214,8 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 | 模拟流式 | VAD + OfflineRecognizer | 用离线模型实现类流式体验，扩展可用模型范围 |
 | GPU 构建 | 隔离临时 venv | 避免 CUDA 包污染开发环境，保持 dev/build 分离 |
 | 版本控制 | 内容差异脏检测 | 避免无修改也创建版本，减少版本噪音 |
+| OCR 延迟导入 | Lazy import OCR module | 避免 onnxruntime DLL 与 pywebview/WebView2 冲突 |
+| PDF 转换 | PyMuPDF | 纯 Python 实现，无需系统依赖（对比 pdf2image + poppler） |
 
 ---
 
@@ -224,5 +227,6 @@ SenseVoice int8 模型使用 model.int8.onnx 而非 model.onnx，但代码只检
 4. **Whisper.cpp 双引擎架构**：sherpa-onnx + whisper.cpp 双 ASR 后端，用户可按需切换，模型选择器自动过滤
 5. **跨平台音频处理**：macOS AudioContext 兼容（重采样、suspended 重试、静音检测）
 6. **多供应商 AI 集成**：OpenAI-compatible + OpenRouter，预设管理，流式输出，截断恢复
-7. **端到端数据安全**：ASR 全程本地运行，SQLite WAL 持久化，版本历史可追溯
-8. **快速迭代能力**：3 天从 PRD 到可用产品，持续迭代至 v1.3.0
+7. **端到端数据安全**：ASR/OCR 全程本地运行，SQLite WAL 持久化，版本历史可追溯
+8. **OCR 图像识别系统**：基于 RapidOCR 的 PP-OCRv4/v5 引擎，每组件（det/rec/cls）独立版本和类型配置，内置模型生命周期管理，支持图片/多图/PDF，批处理和顺序处理两种模式
+9. **快速迭代能力**：3 天从 PRD 到可用产品，持续迭代至 v2.0.0

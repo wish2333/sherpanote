@@ -95,6 +95,14 @@ onBeforeUnmount(() => {
             <span class="text-sm">音频管理器</span>
           </a>
         </li>
+        <li>
+          <a
+            :class="{ 'bg-base-200': $route.path === '/ocr' }"
+            @click="router.push('/ocr')"
+          >
+            <span class="text-sm">OCR</span>
+          </a>
+        </li>
       </ul>
     </div>
 

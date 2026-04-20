@@ -51,6 +51,22 @@ class AsrConfig:
 
 
 @dataclass(frozen=True)
+class OcrConfig:
+    """RapidOCR engine configuration.
+
+    Each role (det/rec/cls) independently picks version (v4/v5) and type (mobile/server).
+    Note: v4 cls has no server variant.
+    """
+
+    det_model_version: str = "v5"  # "v4" | "v5"
+    det_model_type: str = "mobile"  # "mobile" | "server"
+    rec_model_version: str = "v5"  # "v4" | "v5"
+    rec_model_type: str = "mobile"  # "mobile" | "server"
+    cls_model_version: str = "v5"  # "v4" | "v5"
+    cls_model_type: str = "server"  # "mobile" | "server"
+
+
+@dataclass(frozen=True)
 class AiConfig:
     """LLM backend configuration."""
 
@@ -69,6 +85,7 @@ class AppConfig:
     data_dir: str = ""
     asr: AsrConfig = AsrConfig()
     ai: AiConfig = AiConfig()
+    ocr: OcrConfig = OcrConfig()
     max_versions: int = 20
     auto_ai_modes: tuple[str, ...] = ()  # e.g. ("polish", "note")
     max_tokens_mode: str = "auto"  # "auto" | "custom" | "default"
@@ -118,6 +135,14 @@ class AppConfig:
                 "temperature": self.ai.temperature,
                 "max_tokens": self.ai.max_tokens,
             },
+            "ocr": {
+                "det_model_version": self.ocr.det_model_version,
+                "det_model_type": self.ocr.det_model_type,
+                "rec_model_version": self.ocr.rec_model_version,
+                "rec_model_type": self.ocr.rec_model_type,
+                "cls_model_version": self.ocr.cls_model_version,
+                "cls_model_type": self.ocr.cls_model_type,
+            },
             "max_versions": self.max_versions,
             "auto_ai_modes": list(self.auto_ai_modes),
             "max_tokens_mode": self.max_tokens_mode,
@@ -128,6 +153,7 @@ class AppConfig:
         """Deserialize from dict. Missing keys fall back to defaults."""
         asr_d = data.get("asr", {})
         ai_d = data.get("ai", {})
+        ocr_d = data.get("ocr", {})
         # Migrate old mirror_url to new download_source.
         download_source = asr_d.get("download_source", "github")
         custom_ghproxy_domain = asr_d.get("custom_ghproxy_domain")
@@ -172,6 +198,14 @@ class AppConfig:
                 base_url=ai_d.get("base_url"),
                 temperature=ai_d.get("temperature", 0.7),
                 max_tokens=ai_d.get("max_tokens", 4096),
+            ),
+            ocr=OcrConfig(
+                det_model_version=ocr_d.get("det_model_version", "v5"),
+                det_model_type=ocr_d.get("det_model_type", "mobile"),
+                rec_model_version=ocr_d.get("rec_model_version", "v5"),
+                rec_model_type=ocr_d.get("rec_model_type", "mobile"),
+                cls_model_version=ocr_d.get("cls_model_version", "v5"),
+                cls_model_type=ocr_d.get("cls_model_type", "server"),
             ),
             max_versions=data.get("max_versions", 20),
             auto_ai_modes=tuple(data.get("auto_ai_modes", [])),

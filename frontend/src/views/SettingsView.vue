@@ -26,15 +26,19 @@ import {
   cancelModelInstall,
   exportBackup,
   importBackup,
+  scanOcrModels,
+  downloadOcrModels,
+  deleteOcrModel,
 } from "../bridge";
 import type { BackupOptions, BackupSummary } from "../bridge";
-import type { AiConfig, AsrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus } from "../types";
+import type { AiConfig, AsrConfig, OcrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus, OcrModelFileInfo } from "../types";
 
 const store = useAppStore();
 const router = useRouter();
 
 const aiConfig = ref<AiConfig>(store.aiConfig);
 const asrConfig = ref<AsrConfig>(store.asrConfig);
+const ocrConfig = ref<OcrConfig>(store.ocrConfig);
 const autoAiModes = ref<string[]>(store.autoAiModes);
 const maxTokensMode = ref<"auto" | "custom" | "default">("auto");
 const maxVersions = ref(20);
@@ -46,7 +50,11 @@ const whisperStatus = ref<WhisperBinaryStatus | null>(null);
 const isInstallingWhisper = ref(false);
 const depStatus = ref<DependencyStatus | null>(null);
 const isInstallingFfmpeg = ref(false);
-const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management" | "backup">("general");
+const ocrModelFiles = ref<OcrModelFileInfo[]>([]);
+const isDownloadingOcr = ref(false);
+const deleteOcrConfirm = ref<string | null>(null);
+
+const activeTab = ref<"general" | "ai" | "processing" | "model-settings" | "model-management" | "ocr" | "backup">("general");
 
 const providers = [
   { value: "openai", label: "OpenAI" },
@@ -543,7 +551,7 @@ async function handlePickCookieFile() {
 // ---- Config ----
 
 async function loadConfig() {
-  const res = await call<{ ai: AiConfig; asr: AsrConfig; auto_ai_modes?: string[]; max_tokens_mode?: string; max_versions?: number }>("get_config");
+  const res = await call<{ ai: AiConfig; asr: AsrConfig; ocr?: OcrConfig; auto_ai_modes?: string[]; max_tokens_mode?: string; max_versions?: number }>("get_config");
   if (res.success && res.data) {
     if (res.data.ai) {
       aiConfig.value = res.data.ai;
@@ -558,6 +566,10 @@ async function loadConfig() {
         customLanguage.value = langVal;
         asrConfig.value = { ...asrConfig.value, language: "__custom__" };
       }
+    }
+    if (res.data.ocr) {
+      ocrConfig.value = res.data.ocr;
+      store.ocrConfig = res.data.ocr;
     }
     autoAiModes.value = res.data.auto_ai_modes ?? [];
     store.autoAiModes = autoAiModes.value;
@@ -578,6 +590,7 @@ async function saveConfig() {
   const res = await call("update_config", {
     ai: aiConfig.value,
     asr: asrToSave,
+    ocr: ocrConfig.value,
     auto_ai_modes: autoAiModes.value,
     max_tokens_mode: maxTokensMode.value,
     max_versions: maxVersions.value,
@@ -585,6 +598,7 @@ async function saveConfig() {
   if (res.success) {
     store.aiConfig = aiConfig.value;
     store.asrConfig = asrToSave;
+    store.ocrConfig = ocrConfig.value;
     store.autoAiModes = autoAiModes.value;
     store.showToast("Configuration saved", "success");
   } else {
@@ -695,6 +709,17 @@ const offGpuDetect = onEvent<{
   gpuStatus.value = detail;
 });
 
+const offOcrDownloadComplete = onEvent<{ success: boolean; error?: string }>("ocr_model_download_complete", () => {
+  isDownloadingOcr.value = false;
+  store.showToast("OCR models downloaded", "success");
+  loadOcrModels();
+});
+
+const offOcrDownloadError = onEvent<{ error: string }>("ocr_model_download_error", (detail) => {
+  isDownloadingOcr.value = false;
+  store.showToast(detail.error ?? "OCR model download failed", "error");
+});
+
 onMounted(async () => {
   await loadConfig();
   await loadModels();
@@ -710,7 +735,53 @@ onMounted(async () => {
   }
   // Check dependency status (ffmpeg, yt-dlp)
   await loadDependencyStatus();
+  // Load OCR model list
+  await loadOcrModels();
 });
+
+// ---- OCR Model Management ----
+
+/** Check if a specific model variant is downloaded. */
+function isModelDownloaded(version: string, role: string, modelType: string): boolean {
+  return ocrModelFiles.value.some(
+    (m) => m.version === version && m.role === role && m.model_type === modelType && m.downloaded
+  );
+}
+
+async function loadOcrModels() {
+  const res = await scanOcrModels();
+  if (res.success && res.data) {
+    ocrModelFiles.value = res.data;
+  }
+}
+
+async function handleDownloadOcrModels() {
+  if (isDownloadingOcr.value) return;
+  isDownloadingOcr.value = true;
+  const c = ocrConfig.value;
+  await downloadOcrModels(
+    c.det_model_version, c.det_model_type,
+    c.rec_model_version, c.rec_model_type,
+    c.cls_model_version, c.cls_model_type,
+  );
+}
+
+async function handleDeleteOcrModel(version: string, role: string, modelType: string) {
+  deleteOcrConfirm.value = null;
+  const res = await deleteOcrModel(version, role, modelType);
+  if (res.success) {
+    store.showToast("OCR model deleted", "success");
+    await loadOcrModels();
+  } else {
+    store.showToast(res.error ?? "Failed to delete OCR model", "error");
+  }
+}
+
+/** Available model types per role (v4 cls has no server variant). */
+function availableModelTypes(version: string, role: string): ("mobile" | "server")[] {
+  if (version === "v4" && role === "cls") return ["mobile"];
+  return ["mobile", "server"];
+}
 
 // ---- Backup / Restore ----
 const backupOptions = ref<BackupOptions>({
@@ -809,6 +880,8 @@ onUnmounted(() => {
   offInstallComplete();
   offInstallError();
   offGpuDetect();
+  offOcrDownloadComplete();
+  offOcrDownloadError();
 });
 </script>
 
@@ -854,9 +927,159 @@ onUnmounted(() => {
       >模型管理</a>
       <a
         class="tab"
+        :class="{ 'tab-active': activeTab === 'ocr' }"
+        @click="activeTab = 'ocr'"
+      >OCR</a>
+      <a
+        class="tab"
         :class="{ 'tab-active': activeTab === 'backup' }"
         @click="activeTab = 'backup'"
       >备份</a>
+    </div>
+
+    <!-- OCR Settings -->
+    <div v-show="activeTab === 'ocr'" class="space-y-4">
+      <!-- Engine Configuration -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">OCR 引擎配置</h2>
+          <p class="text-sm text-base-content/60 mb-4">
+            配置 RapidOCR 各组件的模型版本和类型。每个组件可独立选择 v4/v5 版本和 mobile/server 类型。
+          </p>
+
+          <div class="mt-4 space-y-4">
+            <!-- Per-role model selectors -->
+            <div
+              v-for="role in ([
+                { key: 'det', label: '文本检测 (Det)' },
+                { key: 'rec', label: '文本识别 (Rec)' },
+                { key: 'cls', label: '方向分类 (Cls)' },
+              ] as const)"
+              :key="role.key"
+              class="flex items-center gap-3"
+            >
+              <span class="label-text font-medium w-28 flex-shrink-0">{{ role.label }}</span>
+              <select
+                :disabled="isDownloadingOcr"
+                class="select select-bordered select-sm basis-3/5"
+                v-model="ocrConfig[`${role.key}_model_version` as keyof OcrConfig]"
+              >
+                <option value="v4">PP-OCRv4</option>
+                <option value="v5">PP-OCRv5</option>
+              </select>
+              <select
+                :disabled="isDownloadingOcr"
+                class="select select-bordered select-sm basis-2/5"
+                v-model="ocrConfig[`${role.key}_model_type` as keyof OcrConfig]"
+              >
+                <option
+                  v-for="mt in availableModelTypes(ocrConfig[`${role.key}_model_version` as keyof OcrConfig] as string, role.key)"
+                  :key="mt"
+                  :value="mt"
+                >
+                  {{ mt === 'mobile' ? 'Mobile' : 'Server' }}
+                  <template v-if="!isModelDownloaded(ocrConfig[`${role.key}_model_version` as keyof OcrConfig] as string, role.key, mt)"> (未下载)</template>
+                </option>
+              </select>
+              <span
+                v-if="isModelDownloaded(ocrConfig[`${role.key}_model_version` as keyof OcrConfig] as string, role.key, ocrConfig[`${role.key}_model_type` as keyof OcrConfig] as string)"
+                class="badge badge-success badge-xs flex-shrink-0 min-w-[3rem]"
+              >就绪</span>
+              <span v-else class="badge badge-warning badge-xs flex-shrink-0 min-w-[3rem]">未下载</span>
+            </div>
+          </div>
+
+          <!-- Save button -->
+          <div class="card-actions mt-4 justify-end">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isSaving"
+              @click="saveConfig"
+            >
+              <span v-if="isSaving" class="loading loading-spinner loading-xs"></span>
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download Models -->
+      <div class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">下载模型</h2>
+          <p class="text-sm text-base-content/60">
+            按当前配置下载所需的 OCR 模型文件。首次使用 OCR 前请确保模型已下载。
+          </p>
+
+          <div class="mt-4">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="isDownloadingOcr"
+              @click="handleDownloadOcrModels"
+            >
+              <span v-if="isDownloadingOcr" class="loading loading-spinner loading-xs"></span>
+              {{ isDownloadingOcr ? '下载中...' : '下载当前配置的模型' }}
+            </button>
+          </div>
+
+          <!-- Show what will be downloaded -->
+          <div class="mt-3 text-xs text-base-content/50 space-y-1">
+            <div>Det: {{ ocrConfig.det_model_version }} / {{ ocrConfig.det_model_type }}
+              <span v-if="isModelDownloaded(ocrConfig.det_model_version, 'det', ocrConfig.det_model_type)" class="text-success">- 已下载</span>
+              <span v-else class="text-warning">- 需下载</span>
+            </div>
+            <div>Rec: {{ ocrConfig.rec_model_version }} / {{ ocrConfig.rec_model_type }}
+              <span v-if="isModelDownloaded(ocrConfig.rec_model_version, 'rec', ocrConfig.rec_model_type)" class="text-success">- 已下载</span>
+              <span v-else class="text-warning">- 需下载</span>
+            </div>
+            <div>Cls: {{ ocrConfig.cls_model_version }} / {{ ocrConfig.cls_model_type }}
+              <span v-if="isModelDownloaded(ocrConfig.cls_model_version, 'cls', ocrConfig.cls_model_type)" class="text-success">- 已下载</span>
+              <span v-else class="text-warning">- 需下载</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Downloaded Models -->
+      <div v-if="ocrModelFiles.filter(m => m.downloaded).length > 0" class="card bg-base-100 border border-base-300 shadow-md">
+        <div class="card-body">
+          <h2 class="card-title text-base">已下载模型</h2>
+          <p class="text-sm text-base-content/60">
+            删除不再需要的模型以释放磁盘空间。
+          </p>
+          <div class="mt-4 space-y-2">
+            <div
+              v-for="model in ocrModelFiles.filter(m => m.downloaded)"
+              :key="`${model.version}-${model.role}-${model.model_type}`"
+              class="flex items-center justify-between rounded-lg border border-base-300 p-3"
+            >
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-sm">{{ model.role.toUpperCase() }}</span>
+                  <span class="badge badge-sm badge-info">{{ model.version }}</span>
+                  <span class="badge badge-sm">{{ model.model_type }}</span>
+                </div>
+                <div class="mt-1 text-xs text-base-content/50">
+                  {{ model.size_mb }} MB
+                  <span class="ml-2 text-base-content/30 font-mono">{{ model.filename }}</span>
+                </div>
+              </div>
+              <div class="ml-3 flex-shrink-0">
+                <button
+                  v-if="deleteOcrConfirm === `${model.version}-${model.role}-${model.model_type}`"
+                  class="btn btn-error btn-xs"
+                  @click="handleDeleteOcrModel(model.version, model.role, model.model_type)"
+                >确认</button>
+                <button
+                  v-else
+                  class="btn btn-ghost btn-xs text-error"
+                  @click="deleteOcrConfirm = `${model.version}-${model.role}-${model.model_type}`"
+                >删除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Backup -->
