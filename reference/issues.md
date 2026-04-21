@@ -90,6 +90,63 @@ Manual test cases:
 5. Drop files with custom title "My Title" -> all records use My Title as before
 ```
 
+### ClaudeCode-mem
+
+```
+Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️  decision
+#708  5:40 PM  🔵  Investigating timestamped transcription storage and display logic
+     frontend/src/types/index.ts
+       #709  5:41 PM  🔵  Transcript data structures identified in type definitions
+       #710           🔵  Segment and TranscriptRecord type structures confirmed
+     frontend/src/components/TranscriptPanel.vue
+       #711           🔵  Found segment type mismatch in transcription data flow
+     py/storage.py
+       #712  5:42 PM  🔵  SRT export includes timestamps from stored segments
+     py/whispercpp.py
+       #713           🔵  Timestamp conversion flow traced from ASR to SRT export
+     main.py
+       #714  5:43 PM  🔵  Live streaming transcription sends empty timestamp arrays to frontend
+       #715           🔵  Completed investigation of timestamped transcription system
+     frontend/src/components/TranscriptPanel.vue
+       #716           🔵  Comprehensive agent exploration confirms transcription timestamp architecture
+     frontend/src/views/OcrView.vue
+       #717           🔵  Investigating OCR interface add button functionality
+     frontend/src/views/RecordView.vue
+       #718  5:44 PM  🔵  Comparing OCR and recording interface file handling patterns
+     frontend/src/bridge.ts
+       #719  5:45 PM  🔵  Investigating OCR add button by examining bridge layer
+       #720           🔵  Bridge layer provides pickImageFiles and ocrProcess functions
+     frontend/src/types/index.ts
+       #721  5:46 PM  🔵  OCR type definitions identified in types/index.ts
+     pywebvue/bridge.py
+       #722           🔵  Investigating Python backend bridge for OCR file handling
+     main.py
+       #723           🔵  Found pick_image_files implementation in main.py
+     frontend/src/views/RecordView.vue
+       #724           🔵  Comparing record saving patterns between RecordView and OcrView
+     main.py
+       #725           🔵  pick_image_files backend API properly exposed with @expose decorator
+     frontend/src/views/RecordView.vue
+       #726  5:47 PM  🔵  RecordView uses AudioRecorder component for file handling
+     frontend/src/components/AudioRecorder.vue
+       #727           🔵  AudioRecorder uses direct call() to pick_audio_file bridge API
+       #728           🔵  Comparing bridge API call patterns between AudioRecorder and OcrView
+     frontend/src/views/OcrView.vue
+       #729           🔵  Exploration agent analyzed OCR and recording add button implementations
+     General
+       #730           🔵  Starting investigation of model directory browse button refresh issue
+     frontend/src/views/SettingsView.vue
+       #731  5:48 PM  🔵  Found handlePickDirectory function in SettingsView.vue
+       #732           🔵  Confirmed model directory browse button missing loadModels() call
+     frontend/src/bridge.ts
+       #733           🔵  Identified two different input patterns in SettingsView
+     main.py
+       #734           🔵  Backend architecture for model directory changes identified
+     General
+       #735  5:50 PM  🔵  Search confirmed existing observations on model directory browse button investigation
+       #736           🔵  Retrieved existing observations on model directory browse button investigation
+```
+
 ### 📝 Commit Message
 
 ```
