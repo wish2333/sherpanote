@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [2.0.1] - 2026-04-22
+
+### New
+
+- OCR recognition records now automatically add an “OCR-” prefix, standardizing the naming rules for single files, PDFs, and batch processing for easy differentiation and retrieval (custom title functionality remains unchanged)
+
+### Fixed
+
+- Fixed the issue where the add button in the OCR interface was unresponsive
+- Fixed the issue where changing the model directory via the browse button in ASR settings required re-entering the page to take effect
+
 ## [2.0.0] - 2026-04-20
 
 ### New

@@ -234,6 +234,17 @@ Configuration can be modified through the **Settings** interface.
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
 
+[2026-04-22 - OCR Fix]
+
+### New
+
+- OCR recognition records now automatically add an “OCR-” prefix, standardizing the naming rules for single files, PDFs, and batch processing for easy differentiation and retrieval (custom title functionality remains unchanged)
+
+### Fixed
+
+- Fixed the issue where the add button in the OCR interface was unresponsive
+- Fixed the issue where changing the model directory via the browse button in ASR settings required re-entering the page to take effect
+
 [2026-04-20 - OCR Image Recognition]
 
 ### New
@@ -256,24 +267,6 @@ See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
 - Refactored the OCR model management system to use RapidOCR's built-in automatic download and management
 - Packaging optimization: Added an option for pre-downloading OCR models to enhance the offline user experience
 - Streamlined OCR settings by removing unnecessary parameter configurations
-
-### ✨ New
-
-- Added data backup feature: Allows backing up application settings, presets, transcription history, and audio files in settings
-- Supports selective backup, allowing flexible choice of data types to back up
-- Automatic compatibility with different operating systems after import, enabling cross-platform data transfer
-
-### 🐛 Fixes
-
-- Fixed the issue where a new window was unexpectedly opened when downloading models on Mac
-- Resolved the problem where leaving the recording interface during AI processing caused results to be lost
-- Fixed incorrect display of Markdown headings and tables
-- Solved timeout and 404 errors that occurred when downloading models from hf-mirror
-
-### ⚡ Optimizations
-
-- Improved the persistence mechanism for AI processing results to ensure a seamless user experience
-- Enhanced stability and speed of model downloads, reducing failures caused by network issues
 
 ## Contributing
 
