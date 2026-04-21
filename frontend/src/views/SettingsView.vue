@@ -442,7 +442,8 @@ async function handlePickDirectory() {
   const res = await pickDirectory();
   if (res.success && res.data) {
     asrConfig.value = { ...asrConfig.value, model_dir: res.data.path };
-    saveConfig();
+    await saveConfig();
+    await loadModels();
   }
 }
 

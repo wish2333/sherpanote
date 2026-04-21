@@ -1728,11 +1728,12 @@ class SherpaNoteAPI(Bridge):
                             }
                             for i, r in enumerate(results) if r.text.strip()
                         ]
-                        record_title = title or source_name if mode == "batch" else (title or "OCR")
-                        if mode == "batch":
-                            record_title = f"{record_title}" if len(image_entries) == 1 else f"{source_name}_{idx + 1}"
-                        if len(created_records) > 0:
-                            record_title = f"{title or source_name}_{idx + 1}"
+                        record_title = title or f"OCR-{source_name}"
+                        if mode == "batch" and len(image_entries) > 1:
+                            first_source = image_entries[0][1]
+                            record_title = title or f"OCR-{first_source}"
+                            if len(created_records) > 0:
+                                record_title = title or f"OCR-{source_name}"
 
                         record = self._storage.save({
                             "title": record_title,
@@ -1760,8 +1761,9 @@ class SherpaNoteAPI(Bridge):
                         }
                         for i, r in enumerate(all_results) if r.text.strip()
                     ]
+                    first_source = image_entries[0][1] if image_entries else "OCR"
                     record = self._storage.save({
-                        "title": title or "OCR",
+                        "title": title or f"OCR-{first_source}",
                         "audio_path": None,
                         "transcript": text,
                         "segments": segments,
@@ -1799,12 +1801,18 @@ class SherpaNoteAPI(Bridge):
             try:
                 dialog_type = webview.FileDialog.OPEN
             except AttributeError:
-                dialog_type = webview.OPEN_DIALOG
-            result = self._window.create_file_dialog(
-                dialog_type=dialog_type,
-                file_types=file_types,
-                allows_multiple_selection=True,
-            )
+                dialog_type = webview.OPEN_DIALOG  # fallback for older versions
+            try:
+                result = self._window.create_file_dialog(
+                    dialog_type=dialog_type,
+                    file_types=file_types,
+                    allows_multiple_selection=True,
+                )
+            except TypeError:
+                result = self._window.create_file_dialog(
+                    dialog_type=dialog_type,
+                    file_types=file_types,
+                )
             if result:
                 return {"success": True, "data": result}
             return {"success": False, "error": "No file selected"}
