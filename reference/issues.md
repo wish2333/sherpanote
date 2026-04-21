@@ -66,18 +66,18 @@ Modified: main.py - ocr_process method title logic
 New naming behavior (when user doesn't provide custom title):
      
 ┌───────────────────────────────────┬─────────────────────────┬────────────────────────┐
-       │             Scenario              │        Old Name         │        New Name        │
-       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
-       │ Single image                      │ filename                │ OCR-filename           │
-       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
-       │ Single PDF (multi-page)           │ pdfname (per page)      │ OCR-pdfname (per page) │
-       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
-       │ Batch, multiple files, 1st file   │ filename_1 / filename   │ OCR-first_filename     │
-       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
-       │ Batch, multiple files, subsequent │ filename_2 / filename_3 │ OCR-each_filename      │
-       ├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
-       │ Single/Sequential mode            │ OCR                     │ OCR-first_filename     │
-       └───────────────────────────────────┴─────────────────────────┴────────────────────────┘
+│             Scenario              │        Old Name         │        New Name        │
+├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+│ Single image                      │ filename                │ OCR-filename           │
+├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+│ Single PDF (multi-page)           │ pdfname (per page)      │ OCR-pdfname (per page) │
+├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+│ Batch, multiple files, 1st file   │ filename_1 / filename   │ OCR-first_filename     │
+├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+│ Batch, multiple files, subsequent │ filename_2 / filename_3 │ OCR-each_filename      │
+├───────────────────────────────────┼─────────────────────────┼────────────────────────┤
+│ Single/Sequential mode            │ OCR                     │ OCR-first_filename     │
+└───────────────────────────────────┴─────────────────────────┴────────────────────────┘
      
 If the user provides a custom title in the input field, it continues to use that title directly.
      
@@ -103,7 +103,7 @@ feat(ocr): 优化OCR记录命名规则添加OCR前缀
 ### 🚀 Release Notes
 
 ```
-## 2025-06-17 - OCR记录命名优化
+## 2026-04-21 - OCR记录命名优化
 
 ### ✨ 新增
 - OCR记录现在自动添加"OCR-"前缀，提高文件识别度
