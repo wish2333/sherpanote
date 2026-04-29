@@ -100,6 +100,15 @@ hiddenimports = [
     "pdfplumber",
     "pypdfium2",
     "PIL",
+    # plugin subsystem
+    "py.plugins",
+    "py.plugins.paths",
+    "py.plugins.manager",
+    "py.plugins.runner",
+    "py.plugins.java_detect",
+    "py.plugins.runners",
+    "py.plugins.runners.docling_runner",
+    "py.plugins.runners.opendata_runner",
 ]
 
 
@@ -154,7 +163,23 @@ for _cfg_name in ("config.yaml", "default_models.yaml"):
         a.datas.append((str(_Path("rapidocr") / _cfg_name), str(_cfg_path), "DATA"))
 
 # cv2 data files (haarcascades, etc.) are collected automatically
-# by PyInstaller through hiddenimports — no manual collection needed.
+# by PyInstaller through hiddenimports -- no manual collection needed.
+
+# Plugin system: collect bundled Python and uv if available.
+# These are downloaded by build.py --with-plugins and placed in build/plugins_support/.
+_plugins_support = project_root / "build" / "plugins_support"
+_bundled_python_dir = _plugins_support / "python"
+_bundled_uv = _plugins_support / ("uv.exe" if sys.platform == "win32" else "uv")
+if _bundled_python_dir.exists():
+    # Collect the entire bundled Python directory tree
+    for _item in _bundled_python_dir.rglob("*"):
+        if _item.is_file():
+            _rel = _item.relative_to(_bundled_python_dir)
+            a.binaries.append((str(_item), str(_plugins_support / "python" / _rel), "BINARY"))
+    print(f"[DEBUG] Bundled Python: {_bundled_python_dir}")
+if _bundled_uv.exists():
+    a.binaries.append((str(_bundled_uv), str(_plugins_support / _bundled_uv.name), "BINARY"))
+    print(f"[DEBUG] Bundled uv: {_bundled_uv}")
 
 if sys.platform == "win32":
     a.excludes += EXCLUDES_WIN32

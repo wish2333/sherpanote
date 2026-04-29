@@ -580,6 +580,7 @@ examples:
     uv run build.py --cuda                             CUDA GPU build (CUDA 11.8)
     uv run build.py --cuda --cuda-variant cuda12.cudnn9  CUDA 12.8 + cuDNN 9
     uv run build.py --with-ocr-models                  Bundle default OCR models (onedir)
+    uv run build.py --with-plugins                    Bundle plugin runtime (Python + uv)
     uv run build.py --android                          Android APK (macOS / Linux)
     uv run build.py --clean                            Remove build artifacts
 
@@ -609,6 +610,9 @@ configuration:
                         help="Bundle default OCR models (onedir only). "
                              "Downloads v5/mobile det, v5/mobile rec, "
                              "v5/server cls into the package.")
+    parser.add_argument("--with-plugins", action="store_true",
+                        help="Bundle plugin runtime (python-build-standalone + uv). "
+                             "Enables optional backends (docling, opendataloader-pdf).")
     args = parser.parse_args()
 
     if args.clean:
@@ -629,6 +633,10 @@ configuration:
         _error("--with-ocr-models is not compatible with --onefile mode. "
                "OCR models are too large for single-exe distribution.")
 
+    if args.with_plugins and args.onefile:
+        _error("--with-plugins is not compatible with --onefile mode. "
+               "Plugin runtime is too large for single-exe distribution.")
+
     _build_frontend()
 
     # Download models if requested.
@@ -641,6 +649,10 @@ configuration:
     ocr_model_datas: list[tuple[str, str]] = []
     if args.with_ocr_models:
         ocr_model_datas = _download_ocr_models()
+
+    # Download plugin runtime if requested.
+    if args.with_plugins:
+        _download_plugin_runtime()
 
     _build_desktop(
         onefile=args.onefile,
@@ -704,6 +716,170 @@ def _build_desktop(
         if cuda_venv_python is not None:
             _info(f"CUDA build venv kept at: {_CUDA_BUILD_VENV}")
             _info(f"(delete manually with: rmdir /s /q {_CUDA_BUILD_VENV})")
+
+
+# ========== plugin runtime bundling ==========
+
+# python-build-standalone: install_only Python for creating plugin venvs
+# Matches the major.minor version used in pyproject.toml
+_PBS_VERSION = "3.11.11"
+_PBS_BUILD = "20241016"
+_PBS_PLATFORM = {
+    "win32": "x86_64-pc-windows-msvc-shared-install_only.tar.gz",
+    "darwin": "aarch64-apple-darwin-install_only.tar.gz",
+    "linux": "x86_64-unknown-linux-gnu-install_only.tar.gz",
+}
+_PBS_URL_TEMPLATE = (
+    "https://github.com/indygreg/python-build-standalone/releases/download/"
+    "{version}/cpython-{version}+{build}-{platform}"
+)
+
+# uv standalone binary
+_UV_VERSION = "0.6.6"
+
+
+def _download_plugin_runtime() -> None:
+    """Download python-build-standalone and uv binary for plugin venv support.
+
+    Places files in build/plugins_support/python/ and build/plugins_support/uv(.exe).
+    These are collected by app.spec during PyInstaller build.
+    """
+    import urllib.request
+
+    support_dir = PROJECT_ROOT / "build" / "plugins_support"
+    support_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Download python-build-standalone
+    platform_key = sys.platform
+    if platform_key not in _PBS_PLATFORM:
+        _error(f"Plugin runtime not supported on platform: {sys.platform}")
+
+    pbs_filename = f"cpython-{_PBS_VERSION}+{_PBS_BUILD}-{_PBS_PLATFORM[platform_key]}"
+    pbs_url = _PBS_URL_TEMPLATE.format(
+        version=_PBS_VERSION,
+        build=_PBS_BUILD,
+        platform=_PBS_PLATFORM[platform_key],
+    )
+    pbs_archive = support_dir / pbs_filename
+    pbs_target = support_dir / "python"
+
+    if pbs_target.exists():
+        _info("[plugins] Using existing bundled Python")
+    else:
+        _info(f"[plugins] Downloading python-build-standalone {_PBS_VERSION}...")
+        _info(f"  URL: {pbs_url}")
+        _download_file(pbs_url, pbs_archive)
+
+        _info("[plugins] Extracting Python...")
+        import tarfile
+        with tarfile.open(pbs_archive, "r:gz") as tf:
+            # Extract to a temp dir first, then move the python/ subdir
+            tmp_extract = support_dir / "_tmp_extract"
+            if tmp_extract.exists():
+                shutil.rmtree(tmp_extract)
+            tmp_extract.mkdir()
+            tf.extractall(tmp_extract)
+
+            # Find the python install directory inside the archive
+            extracted_python = None
+            for item in tmp_extract.iterdir():
+                if item.name.startswith("python"):
+                    extracted_python = item
+                    break
+            if extracted_python is None:
+                _error("Could not find python directory in python-build-standalone archive")
+
+            if pbs_target.exists():
+                shutil.rmtree(pbs_target)
+            shutil.move(str(extracted_python), str(pbs_target))
+            shutil.rmtree(tmp_extract)
+
+        # Clean up archive
+        pbs_archive.unlink(missing_ok=True)
+
+        # Verify
+        py_exe = pbs_target / ("python.exe" if sys.platform == "win32" else "bin" / "python3")
+        if py_exe.exists():
+            _info(f"[plugins] Bundled Python: {py_exe}")
+        else:
+            _warn(f"[plugins] Python executable not found at {py_exe}")
+
+    # 2. Download uv
+    uv_ext = ".exe" if sys.platform == "win32" else ""
+    uv_target = support_dir / f"uv{uv_ext}"
+
+    if uv_target.exists():
+        _info("[plugins] Using existing bundled uv")
+    else:
+        _info(f"[plugins] Downloading uv {_UV_VERSION}...")
+
+        if sys.platform == "win32":
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-pc-windows-msvc.zip"
+            uv_archive = support_dir / "uv.zip"
+            _download_file(uv_url, uv_archive)
+            import zipfile
+            with zipfile.ZipFile(uv_archive, "r") as zf:
+                for name in zf.namelist():
+                    if name.endswith("uv.exe"):
+                        with zf.open(name) as src, open(uv_target, "wb") as dst:
+                            dst.write(src.read())
+                        break
+            uv_archive.unlink(missing_ok=True)
+        elif sys.platform == "darwin":
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-aarch64-apple-darwin.tar.gz"
+            _download_and_extract_uv_tar(uv_url, uv_target, support_dir)
+        else:
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+            _download_and_extract_uv_tar(uv_url, uv_target, support_dir)
+
+        _info(f"[plugins] Bundled uv: {uv_target}")
+
+    # Size summary
+    total_size = 0
+    for f in support_dir.rglob("*"):
+        if f.is_file():
+            total_size += f.stat().st_size
+    _info(f"[plugins] Plugin runtime total: {total_size / (1024 * 1024):.1f} MB")
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download a file with progress display."""
+    import urllib.request
+
+    def _on_progress(block_num: int, block_size: int, total_size: int) -> None:
+        if total_size > 0:
+            downloaded = block_num * block_size
+            pct = min(int(100 * downloaded / total_size), 100)
+            mb = downloaded / (1024 * 1024)
+            total_mb = total_size / (1024 * 1024)
+            sys.stdout.write(f"\r  {pct}% ({mb:.0f}/{total_mb:.0f} MB)")
+            sys.stdout.flush()
+
+    try:
+        urllib.request.urlretrieve(url, dest, _on_progress)
+        print()  # newline after progress
+    except Exception as e:
+        _error(f"Download failed: {e}\n  URL: {url}")
+
+
+def _download_and_extract_uv_tar(url: str, uv_target: Path, support_dir: Path) -> None:
+    """Download and extract uv from a tar.gz archive."""
+    import tarfile
+
+    uv_archive = support_dir / "uv.tar.gz"
+    _download_file(url, uv_archive)
+
+    with tarfile.open(uv_archive, "r:gz") as tf:
+        for member in tf.getmembers():
+            if member.name.endswith("/uv") and not member.isdir():
+                # Extract just the uv binary
+                with tf.extractfile(member) as src, open(uv_target, "wb") as dst:
+                    dst.write(src.read())
+                break
+    uv_archive.unlink(missing_ok=True)
+
+    # Make executable on Unix
+    uv_target.chmod(uv_target.stat().st_mode | 0o755)
 
 
 # ========== OCR model bundling ==========

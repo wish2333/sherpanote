@@ -62,6 +62,7 @@ class SherpaNoteAPI(Bridge):
         self._ai: AIProcessor | None = None
         self._ocr_engine: OcrEngine | None = None
         self._document_extractor = None
+        self._plugin_manager = None
         self._ocr_cancel_event = threading.Event()
         self._preset_store = AiPresetStore()
         self._processing_preset_store = ProcessingPresetStore()
@@ -1652,12 +1653,27 @@ class SherpaNoteAPI(Bridge):
             )
         return self._ocr_engine
 
+    def _get_plugin_manager(self):
+        """Lazy-initialize the plugin manager."""
+        if self._plugin_manager is None:
+            from py.plugins.manager import PluginManager
+            self._plugin_manager = PluginManager()
+        return self._plugin_manager
+
     def _get_document_extractor(self):
-        """Lazy-initialize the document extractor."""
+        """Lazy-initialize the document extractor with optional plugin support."""
         if self._document_extractor is None:
             from py.document_extractor import DocumentExtractor
+            try:
+                pm = self._get_plugin_manager()
+                doc_config = self._config.document
+            except Exception:
+                pm = None
+                doc_config = None
             self._document_extractor = DocumentExtractor(
                 ocr_engine=self._get_ocr(),
+                plugin_manager=pm,
+                doc_config=doc_config,
             )
         return self._document_extractor
 
@@ -1811,6 +1827,97 @@ class SherpaNoteAPI(Bridge):
         """Cancel the current OCR processing."""
         self._ocr_cancel_event.set()
         return {"success": True, "data": {"status": "cancelled"}}
+
+    @expose
+    def get_plugin_status(self) -> dict:
+        """Get installation status of all plugin backends."""
+        try:
+            pm = self._get_plugin_manager()
+            statuses = pm.get_all_status()
+            return {
+                "success": True,
+                "data": {
+                    name: {"installed": s.installed, "version": s.version}
+                    for name, s in statuses.items()
+                },
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def install_plugin(self, package_name: str) -> dict:
+        """Install a plugin package into the plugin venv.
+
+        Runs in background thread, emits progress events.
+        """
+        def _work() -> None:
+            try:
+                pm = self._get_plugin_manager()
+
+                def on_output(line: str) -> None:
+                    self._emit("plugin_install_progress", {"message": line})
+
+                result = pm.install_package(package_name, on_output=on_output)
+                if result["success"]:
+                    self._emit("plugin_install_complete", {
+                        "package": package_name,
+                        "version": result.get("version"),
+                    })
+                else:
+                    self._emit("plugin_install_error", {
+                        "package": package_name,
+                        "error": result.get("error", "Unknown error"),
+                    })
+            except Exception as e:
+                self._emit("plugin_install_error", {
+                    "package": package_name,
+                    "error": str(e),
+                })
+
+        self.dispatch_task("install_plugin", {})
+        return {"success": True}
+
+    @expose
+    def uninstall_plugin(self, package_name: str) -> dict:
+        """Uninstall a plugin package from the plugin venv."""
+        try:
+            pm = self._get_plugin_manager()
+            # Map display names to pip package names
+            from py.plugins.manager import PACKAGE_NAMES
+            pip_name = PACKAGE_NAMES.get(package_name, package_name)
+            result = pm.uninstall_package(pip_name)
+            return {"success": result["success"], "data": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def detect_java(self) -> dict:
+        """Detect Java 11+ runtime on the system."""
+        try:
+            from py.plugins.java_detect import detect_java
+            manual_path = self._config.plugin.manual_java_path
+            result = detect_java(manual_path=manual_path)
+            return {
+                "success": True,
+                "data": {
+                    "found": result.found,
+                    "path": result.path,
+                    "version": result.version,
+                    "error": result.error,
+                },
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def get_available_backends(self) -> dict:
+        """Get availability status of all document extraction backends."""
+        try:
+            extractor = self._get_document_extractor()
+            backends = extractor.get_available_backends()
+            return {"success": True, "data": backends}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @expose
     def pick_image_files(self) -> dict:

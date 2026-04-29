@@ -142,11 +142,40 @@ export interface OcrFileEntry {
   page_count?: number;
 }
 
+/** Plugin system configuration. */
+export interface PluginConfig {
+  manual_java_path: string | null;
+  docling_artifacts_path: string | null;
+}
+
+/** Document extraction backend selection. */
+export interface DocumentConfig {
+  text_pdf_engine: "markitdown" | "opendataloader" | "docling" | "ppocr";
+  scan_pdf_engine: "ppocr" | "docling";
+}
+
+/** Plugin package installation status. */
+export interface PluginPackageStatus {
+  name: string;
+  installed: boolean;
+  version: string | null;
+}
+
+/** Java runtime detection result. */
+export interface JavaDetectionResult {
+  found: boolean;
+  path: string | null;
+  version: string | null;
+  error: string | null;
+}
+
 /** App settings bundle. */
 export interface AppSettings {
   ai: AiConfig;
   asr: AsrConfig;
   ocr: OcrConfig;
+  plugin: PluginConfig;
+  document: DocumentConfig;
   auto_ai_modes: string[];
   max_tokens_mode: string;
 }

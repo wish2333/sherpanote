@@ -67,6 +67,22 @@ class OcrConfig:
 
 
 @dataclass(frozen=True)
+class PluginConfig:
+    """Plugin system configuration."""
+
+    manual_java_path: str | None = None
+    docling_artifacts_path: str | None = None  # Custom docling model directory
+
+
+@dataclass(frozen=True)
+class DocumentConfig:
+    """Document extraction backend selection."""
+
+    text_pdf_engine: str = "markitdown"  # "markitdown" | "opendataloader" | "docling" | "ppocr"
+    scan_pdf_engine: str = "ppocr"  # "ppocr" | "docling"
+
+
+@dataclass(frozen=True)
 class AiConfig:
     """LLM backend configuration."""
 
@@ -86,6 +102,8 @@ class AppConfig:
     asr: AsrConfig = AsrConfig()
     ai: AiConfig = AiConfig()
     ocr: OcrConfig = OcrConfig()
+    plugin: PluginConfig = PluginConfig()
+    document: DocumentConfig = DocumentConfig()
     max_versions: int = 20
     auto_ai_modes: tuple[str, ...] = ()  # e.g. ("polish", "note")
     max_tokens_mode: str = "auto"  # "auto" | "custom" | "default"
@@ -143,6 +161,14 @@ class AppConfig:
                 "cls_model_version": self.ocr.cls_model_version,
                 "cls_model_type": self.ocr.cls_model_type,
             },
+            "plugin": {
+                "manual_java_path": self.plugin.manual_java_path,
+                "docling_artifacts_path": self.plugin.docling_artifacts_path,
+            },
+            "document": {
+                "text_pdf_engine": self.document.text_pdf_engine,
+                "scan_pdf_engine": self.document.scan_pdf_engine,
+            },
             "max_versions": self.max_versions,
             "auto_ai_modes": list(self.auto_ai_modes),
             "max_tokens_mode": self.max_tokens_mode,
@@ -154,6 +180,8 @@ class AppConfig:
         asr_d = data.get("asr", {})
         ai_d = data.get("ai", {})
         ocr_d = data.get("ocr", {})
+        plugin_d = data.get("plugin", {})
+        document_d = data.get("document", {})
         # Migrate old mirror_url to new download_source.
         download_source = asr_d.get("download_source", "github")
         custom_ghproxy_domain = asr_d.get("custom_ghproxy_domain")
@@ -206,6 +234,14 @@ class AppConfig:
                 rec_model_type=ocr_d.get("rec_model_type", "mobile"),
                 cls_model_version=ocr_d.get("cls_model_version", "v5"),
                 cls_model_type=ocr_d.get("cls_model_type", "server"),
+            ),
+            plugin=PluginConfig(
+                manual_java_path=plugin_d.get("manual_java_path"),
+                docling_artifacts_path=plugin_d.get("docling_artifacts_path"),
+            ),
+            document=DocumentConfig(
+                text_pdf_engine=document_d.get("text_pdf_engine", "markitdown"),
+                scan_pdf_engine=document_d.get("scan_pdf_engine", "ppocr"),
             ),
             max_versions=data.get("max_versions", 20),
             auto_ai_modes=tuple(data.get("auto_ai_modes", [])),

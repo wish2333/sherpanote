@@ -358,7 +358,7 @@ def uninstall_all_plugins():
 
 Base package: ~283MB. Optional backends downloaded on demand.
 
-# 审计更新
+# Phase1
 
 - docs\PRD-2.1.0.md
 -   Phase 1 共 10 个任务，按依赖顺序：
@@ -608,4 +608,238 @@ feat(ocr): 重构文档提取架构并支持Office文件
 - PDF 解析引擎更换，提升图片型 PDF 的渲染质量与兼容性
 - 文本型 PDF 提取效率提升，不再走不必要的 OCR 流程
 - 处理过程日志更简洁，减少无关调试信息干扰
+```
+
+# Phase2
+
+```
+● Phase 2 实现计划：插件运行时架构 + docling/opendataloader-pdf 适配器
+
+  架构概览
+
+  py/plugins/              # 新增插件子系统
+    paths.py               # 路径解析（frozen vs dev）
+    manager.py             # venv 生命周期管理
+    runner.py              # 子进程 JSON 通信协议
+    java_detect.py         # Java 11+ 多策略检测
+    runners/               # 子进程入口脚本
+      docling_runner.py
+      opendata_runner.py
+  py/adapters/             # 新增两个适配器
+    docling_adapter.py     # 通过子进程调用 docling
+    opendata_adapter.py    # 通过子进程调用 opendataloader-pdf
+
+  实施阶段（10个任务）
+
+  ┌──────┬─────────────────┬───────┬────────┬─────────────────────────────────┐
+  │ 阶段 │      任务       │ 新/改 │ 复杂性 │              描述               │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ A1   │ 插件路径解析    │ 新建  │ 小     │ frozen/dev 模式路径解析         │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ A2   │ 插件管理器      │ 新建  │ 中     │ venv 创建、安装、检测、卸载     │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ A3   │ 子进程运行器    │ 新建  │ 中     │ JSON stdin/stdout 通信协议      │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ B1   │ docling runner  │ 新建  │ 中     │ docling 子进程入口脚本          │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ B2   │ opendata runner │ 新建  │ 小     │ opendataloader-pdf 子进程入口   │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ C1   │ docling 适配器  │ 新建  │ 小     │ 通过 runner 调用 docling        │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ C2   │ opendata 适配器 │ 新建  │ 小     │ 通过 runner 调用 opendataloader │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ D1   │ Java 检测       │ 新建  │ 中     │ 多策略 Java 11+ 检测            │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ E1   │ 配置扩展        │ 修改  │ 小     │ PluginConfig + DocumentConfig   │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ F1   │ 决策树集成      │ 修改  │ 中     │ DocumentExtractor 支持可选后端  │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ F2   │ main.py 集成    │ 修改  │ 中     │ 暴露插件管理 API                │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ G1   │ 构建脚本        │ 修改  │ 中大   │ 下载捆绑 Python + uv            │
+  ├──────┼─────────────────┼───────┼────────┼─────────────────────────────────┤
+  │ G2   │ app.spec        │ 修改  │ 小     │ PyInstaller 包含捆绑资源        │
+  └──────┴─────────────────┴───────┴────────┴─────────────────────────────────┘
+
+  关键路径
+
+  A1 -> A2 + A3 -> B1 + B2 -> C1 + C2 -> F1 -> F2
+                  D1 ──────────────────> C2
+                  E1 ──────────────────> F1
+
+  主要风险
+
+  - 高: 子进程 stdout/stderr 缓冲区死锁（用 communicate() 缓解）
+  - 中: 捆绑 Python 版本与主应用不匹配（固定同版本）
+  - 中: docling API 不稳定（固定版本范围）
+
+  预计新增代码: ~1300-1500 行 | 新文件: 10 | 修改文件: 6
+```
+
+### Phase 2 Complete
+
+```
+  New Files (10)
+
+  ┌───────────────────────────────────────┬─────────────────────────────────────────────────────────────────┐
+  │                 File                  │                             Purpose                             │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/__init__.py                │ Package marker                                                  │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/paths.py                   │ Frozen/dev path resolution for Python, uv, venv                 │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/manager.py                 │ PluginManager: venv lifecycle, install/uninstall packages       │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/runner.py                  │ SubprocessRunner: JSON stdin/stdout protocol, timeout, progress │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/java_detect.py             │ Multi-strategy Java 11+ detection                               │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/runners/__init__.py        │ Package marker                                                  │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/runners/docling_runner.py  │ docling CLI wrapper (text_layer + OCR mode)                     │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/plugins/runners/opendata_runner.py │ opendataloader-pdf CLI wrapper                                  │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/adapters/docling_adapter.py        │ DoclingAdapter via subprocess                                   │
+  ├───────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ py/adapters/opendata_adapter.py       │ OpendataAdapter via subprocess                                  │
+  └───────────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
+
+  Modified Files (6)
+
+  ┌─────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┐
+  │            File             │                                      Changes                                       │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ py/config.py                │ Added PluginConfig, DocumentConfig dataclasses, updated to_dict/from_dict          │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ py/document_extractor.py    │ Added plugin backend routing (docling, opendataloader) with fallback chain         │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ main.py                     │ Added _plugin_manager, _get_plugin_manager(), updated _get_document_extractor(), 6 │
+  │                             │  new @expose API methods                                                           │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ frontend/src/types/index.ts │ Added PluginConfig, DocumentConfig, PluginPackageStatus, JavaDetectionResult types │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ app.spec                    │ Added plugin hidden imports + bundled Python/uv binary collection                  │
+  ├─────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┤
+  │ build.py                    │ Added --with-plugins flag + _download_plugin_runtime() for Python+uv bundling      │
+  └─────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────┘
+
+  New API Methods (main.py)
+
+  - get_plugin_status() - installation status of all plugin backends
+  - install_plugin(package_name) - background install with progress events
+  - uninstall_plugin(package_name) - remove from plugin venv
+  - detect_java() - Java 11+ runtime detection
+  - get_available_backends() - availability of all extraction backends
+  
+● 开发环境完全支持插件系统。新增的 dev.py plugin 子命令：
+
+  ┌─────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────┐
+  │                命令                 │                                   功能                                    │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin status         │ 查看插件系统状态：运行模式、Python/uv 路径、venv 状态、已安装后端、Java   │
+  │                                     │ 检测、决策树配置                                                          │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin install        │ 安装 docling 到插件 venv                                                  │
+  │ docling                             │                                                                           │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin install        │ 安装 opendataloader-pdf                                                   │
+  │ opendataloader                      │                                                                           │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin uninstall      │ 卸载插件                                                                  │
+  │ docling                             │                                                                           │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin destroy        │ 销毁整个插件 venv                                                         │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin detect-java    │ 检测 Java 11+                                                             │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────┤
+  │ uv run dev.py plugin test FILE      │ 用当前配置测试文件提取                                                    │
+  └─────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────┘
+
+  开发模式下插件系统使用系统 Python 和 uv 创建独立的 .plugin_dev/.venv，不会污染项目 .venv。切换后端只需
+  install/uninstall 对应插件，决策树会根据 DocumentConfig 中配置的引擎自动路由，不可用时自动回退到默认引擎。
+```
+
+### CC-Mem
+
+```
+Legend: session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | ⚖️ decision
+Apr 30, 2026
+
+CLAUDE.md
+  #4243  12:50 AM  ✅  Updated project documentation with PDF processing dependencies  
+..\..\Git\GiteaManager\sherpanote\README.md
+  #4244            ✅  README.md updated with multi-backend OCR feature documentation  
+  #4245            ✅  Technology Stack section updated with new OCR backend dependencies  
+  #4246  12:51 AM  ✅  Project Structure section updated with new OCR backend architecture files  
+  #4247            ✅  Acknowledgments section updated with markitdown attribution  
+..\..\Git\GiteaManager\sherpanote\README_zh.md
+  #4248            ✅  Chinese README (README_zh.md) updated with multi-backend OCR feature documentation  
+  #4249            ✅  Chinese README Technology Stack section updated with new OCR backend dependencies  
+General
+  #4250  12:56 AM  🔵  Phase 1 document extraction system completed, Phase 2 planning initiated  
+  #4251            🔵  OCR integration partially implemented in main.py with API endpoints  
+  #4252            🔵  Phase 1 OCR integration complete with full UI and configuration system  
+  #4253            🔵  OcrConfig fully implemented with frozen dataclass pattern  
+  #4254  1:03 AM  ⚖️  Plugin path resolver architecture for SherpaNote  
+  #4255           ⚖️  Subprocess communication protocol for plugins  
+  #4256           ⚖️  Plugin manager architecture for SherpaNote  
+  #4257           ⚖️  Java runtime detection strategy for plugins  
+  #4258           ⚖️  Configuration schema extension for plugin system  
+  #4259           ⚖️  Plugin runner scripts for document processing backends  
+  #4260           ⚖️  Backend adapter architecture for document processing  
+  #4261           ⚖️  Decision tree routing and main API integration  
+py/adapters/__init__.py
+  #4262  1:04 AM  ⚖️  Build system enhancement for bundled Python runtime  
+py/document_extractor.py
+  #4263           🔵  MCP smart_outline tool doesn't support Python files  
+  #4264           🔵  DocumentExtractor decision tree architecture  
+py/outputs/unified_document.py
+  #4265           🔵  Unified document output model architecture  
+py/adapters/markitdown_adapter.py
+  #4266           🔵  Adapter pattern for document processing backends  
+py/config.py
+  #4267           🔵  Configuration system architecture with SQLite persistence  
+main.py
+  #4268           🔵  Main API integration points for document extraction  
+frontend/src/types/index.ts
+  #4269           🔵  TypeScript type definitions mirror Python config dataclasses  
+py/plugins/__init__.py
+  #4270           🟣  Plugin path resolver with frozen/dev mode support  
+py/plugins/runner.py
+  #4271           🟣  Subprocess runner with JSON protocol and progress streaming  
+py/plugins/manager.py
+  #4272  1:05 AM  🟣  Plugin manager with virtual environment lifecycle management  
+  #4273           🟣  Plugin manager with venv lifecycle and package operations  
+py/plugins/java_detect.py
+  #4274           🟣  Java runtime detection with multi-strategy fallback  
+  #4275           🟣  Java runtime detection with multi-strategy fallback  
+py/config.py
+  #4276           🟣  Configuration extension with PluginConfig and DocumentConfig  
+  #4277           🟣  AppConfig integration of plugin and document configurations  
+  #4278  1:06 AM  🟣  Config serialization updates for plugin and document configs  
+  #4279           🟣  Configuration system extension completed with full serialization support  
+frontend/src/types/index.ts
+  #4280           🟣  TypeScript type definitions for plugin system added to frontend  
+py/plugins/runners/__init__.py
+  #4281           🟣  Docling runner wrapper script for subprocess execution  
+py/plugins/runners/opendata_runner.py
+  #4282           🟣  Opendata runner wrapper script for subprocess execution  
+py/adapters/docling_adapter.py
+  #4283           🟣  Docling adapter for subprocess-based document extraction  
+py/adapters/opendata_adapter.py
+  #4284  1:07 AM  🟣  Opendata adapter for Java-based document extraction  
+py/document_extractor.py
+  #4285           🟣  DocumentExtractor integration with plugin backends  
+main.py
+  #4286  1:08 AM  🟣  Plugin manager integration into main API  
+General
+  #4287  1:12 AM  🔵  Located dev.py file for plugin support implementation  
+  #4288           🔵  Read existing dev.py structure for plugin implementation  
+  #4289  1:13 AM  🟣  Implemented plugin management CLI in dev.py  
+  #4290           🔵  Plugin status command verified operational  
+  #4291  1:15 AM  🔵  Frontend lacks plugin configuration interface  
+frontend/src/views/SettingsView.vue
+  #4292           🔵  Frontend lacks plugin configuration interface in SettingsView  
+  #4293           🔵  SettingsView tab structure lacks plugins configuration section
 ```
