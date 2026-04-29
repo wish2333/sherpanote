@@ -61,6 +61,7 @@ class SherpaNoteAPI(Bridge):
         self._whisper_asr: "WhisperCppASR | None" = None
         self._ai: AIProcessor | None = None
         self._ocr_engine: OcrEngine | None = None
+        self._document_extractor = None
         self._ocr_cancel_event = threading.Event()
         self._preset_store = AiPresetStore()
         self._processing_preset_store = ProcessingPresetStore()
@@ -1651,12 +1652,47 @@ class SherpaNoteAPI(Bridge):
             )
         return self._ocr_engine
 
+    def _get_document_extractor(self):
+        """Lazy-initialize the document extractor."""
+        if self._document_extractor is None:
+            from py.document_extractor import DocumentExtractor
+            self._document_extractor = DocumentExtractor(
+                ocr_engine=self._get_ocr(),
+            )
+        return self._document_extractor
+
+    @staticmethod
+    def _build_segments(text: str) -> list[dict]:
+        """Build segment list from extracted text.
+
+        Each non-empty line becomes a segment. OCR records have
+        zero timestamps since there is no audio timing.
+        """
+        blocks = [line for line in text.split("\n")
+                   if line.strip() and line.strip() != "---"]
+        return [
+            {
+                "index": i,
+                "text": block,
+                "start_time": 0.0,
+                "end_time": 0.0,
+                "speaker": None,
+                "is_final": True,
+            }
+            for i, block in enumerate(blocks)
+        ]
+
     @expose
     def ocr_process(self, files: list[str], mode: str = "single", title: str | None = None) -> dict:
-        """Run OCR on image/PDF files and create record(s).
+        """Run document extraction on image/PDF/Office files and create record(s).
+
+        Uses a decision tree to route files to the appropriate backend:
+        - Images: PP-OCR (RapidOCR)
+        - Office (DOCX/PPTX/XLSX): markitdown
+        - PDF: text layer detection -> markitdown or PP-OCR
 
         Args:
-            files: list of file paths (images or PDFs).
+            files: list of file paths (images, PDFs, or Office docs).
             mode: "single" (one file -> one record), "batch" (each file -> separate record),
                   "sequential" (all combined into one record).
             title: optional title for the resulting record(s).
@@ -1672,68 +1708,37 @@ class SherpaNoteAPI(Bridge):
 
         def _work() -> None:
             try:
-                engine = self._get_ocr()
+                extractor = self._get_document_extractor()
+                total = len(files)
 
-                # Expand PDFs to images and build the final image list.
-                image_entries: list[tuple[str, str]] = []  # (image_path, source_name)
-                temp_dirs: list[str] = []
-
-                for f in files:
-                    if self._ocr_cancel_event.is_set():
-                        self._emit("ocr_complete", {"status": "cancelled", "records": []})
-                        return
-
-                    from py.ocr import OcrEngine as _OcrEngine
-
-                    if _OcrEngine.is_pdf(f):
-                        tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
-                        temp_dirs.append(tmp)
-                        pages = _OcrEngine.pdf_to_images(f, output_dir=tmp)
-                        for p in pages:
-                            image_entries.append((p, Path(f).stem))
-                    else:
-                        image_entries.append((f, Path(f).stem))
-
-                if not image_entries:
-                    self._emit("ocr_complete", {"status": "error", "error": "No images to process"})
-                    return
-
-                image_paths = [e[0] for e in image_entries]
-
-                def on_progress(current: int, total: int) -> None:
+                def on_file_progress(current: int, file_total: int) -> None:
                     self._emit("ocr_progress", {
                         "status": "processing",
                         "current": current,
-                        "total": total,
-                        "percent": int(100 * current / total) if total > 0 else 0,
+                        "total": file_total,
+                        "percent": int(100 * current / file_total) if file_total > 0 else 0,
                     })
 
                 if mode == "batch":
-                    # Each image/file produces a separate record.
-                    all_results = engine.process_images_batch(image_paths, on_progress=on_progress)
+                    # Each file -> separate record
                     created_records: list[dict] = []
-
-                    for idx, (results, (_, source_name)) in enumerate(zip(all_results, image_entries)):
+                    for i, f in enumerate(files):
                         if self._ocr_cancel_event.is_set():
-                            break
-                        text = "\n".join(r.text for r in results if r.text.strip())
-                        segments = [
-                            {
-                                "index": i,
-                                "text": r.text,
-                                "start_time": 0.0,
-                                "end_time": 0.0,
-                                "speaker": None,
-                                "is_final": True,
-                            }
-                            for i, r in enumerate(results) if r.text.strip()
-                        ]
+                            self._emit("ocr_complete", {"status": "cancelled", "records": []})
+                            return
+
+                        self._emit("ocr_progress", {
+                            "status": "processing",
+                            "current": i,
+                            "total": total,
+                            "percent": int(100 * i / total),
+                        })
+
+                        doc = extractor.extract(f, on_progress=on_file_progress)
+                        text = doc.markdown
+                        segments = self._build_segments(text)
+                        source_name = Path(f).stem
                         record_title = title or f"OCR-{source_name}"
-                        if mode == "batch" and len(image_entries) > 1:
-                            first_source = image_entries[0][1]
-                            record_title = title or f"OCR-{first_source}"
-                            if len(created_records) > 0:
-                                record_title = title or f"OCR-{source_name}"
 
                         record = self._storage.save({
                             "title": record_title,
@@ -1744,24 +1749,45 @@ class SherpaNoteAPI(Bridge):
                         record = self._annotate_record(record)
                         created_records.append(record)
 
+                    self._emit("ocr_progress", {
+                        "status": "processing",
+                        "current": total,
+                        "total": total,
+                        "percent": 100,
+                    })
                     self._emit("ocr_complete", {"status": "done", "records": created_records})
 
                 else:
-                    # Single or sequential: all images combined into one record.
-                    all_results = engine.process_images_sequential(image_paths, on_progress=on_progress)
-                    text = "\n".join(r.text for r in all_results if r.text.strip())
-                    segments = [
-                        {
-                            "index": i,
-                            "text": r.text,
-                            "start_time": 0.0,
-                            "end_time": 0.0,
-                            "speaker": None,
-                            "is_final": True,
-                        }
-                        for i, r in enumerate(all_results) if r.text.strip()
-                    ]
-                    first_source = image_entries[0][1] if image_entries else "OCR"
+                    # Single or sequential: all files combined into one record
+                    all_docs: list = []
+                    for i, f in enumerate(files):
+                        if self._ocr_cancel_event.is_set():
+                            self._emit("ocr_complete", {"status": "cancelled", "records": []})
+                            return
+
+                        self._emit("ocr_progress", {
+                            "status": "processing",
+                            "current": i,
+                            "total": total,
+                            "percent": int(100 * i / total),
+                        })
+
+                        doc = extractor.extract(f, on_progress=on_file_progress)
+                        all_docs.append(doc)
+
+                    # Emit final progress
+                    self._emit("ocr_progress", {
+                        "status": "processing",
+                        "current": total,
+                        "total": total,
+                        "percent": 100,
+                    })
+
+                    # Combine all markdown with separator
+                    parts = [d.markdown for d in all_docs if d.markdown.strip()]
+                    text = "\n\n---\n\n".join(parts)
+                    segments = self._build_segments(text)
+                    first_source = Path(files[0]).stem if files else "OCR"
                     record = self._storage.save({
                         "title": title or f"OCR-{first_source}",
                         "audio_path": None,
@@ -1771,10 +1797,6 @@ class SherpaNoteAPI(Bridge):
                     record = self._annotate_record(record)
                     record = self._auto_process_record(record)
                     self._emit("ocr_complete", {"status": "done", "records": [record]})
-
-                # Cleanup temp PDF images.
-                for tmp_dir in temp_dirs:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
 
             except Exception as exc:
                 logger.exception("OCR processing failed")

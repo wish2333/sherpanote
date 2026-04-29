@@ -47,7 +47,11 @@ async function addFileEntry(p: string) {
   if (files.value.some((f) => f.path === p)) return;
   const name = p.split(/[\\/]/).pop() ?? p;
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const type: "image" | "pdf" = ext === "pdf" ? "pdf" : "image";
+  const type: "image" | "pdf" | "office" = ext === "pdf"
+    ? "pdf"
+    : ["docx", "pptx", "xlsx"].includes(ext)
+      ? "office"
+      : "image";
   let sizeMb = 0;
   try {
     const fs = await (window as any).pywebview?.api?.get_file_size?.(p);
@@ -188,7 +192,7 @@ onUnmounted(() => {
           </svg>
           <p v-if="!isDragOver" class="text-base-content/60 text-sm">拖放图片/PDF 文件到此处，或</p>
           <p v-else class="text-primary font-medium text-sm">松开以添加文件</p>
-          <p class="text-base-content/40 text-xs mt-1">支持 PNG, JPG, BMP, TIFF, WebP, PDF</p>
+          <p class="text-base-content/40 text-xs mt-1">支持 PNG, JPG, BMP, TIFF, WebP, PDF, DOCX, PPTX, XLSX</p>
           <button
             class="btn btn-primary btn-sm mt-3"
             :disabled="isProcessing"
@@ -270,7 +274,7 @@ onUnmounted(() => {
                 @error="delete previewMap[file.path]"
               />
               <span v-else class="text-xs text-base-content/40">
-                {{ file.type === "pdf" ? "PDF" : "IMG" }}
+                {{ file.type === "pdf" ? "PDF" : file.type === "office" ? "DOC" : "IMG" }}
               </span>
             </div>
 
@@ -280,9 +284,9 @@ onUnmounted(() => {
               <div class="flex items-center gap-2">
                 <span
                   class="badge badge-xs"
-                  :class="file.type === 'pdf' ? 'badge-warning' : 'badge-info'"
+                  :class="file.type === 'pdf' ? 'badge-warning' : file.type === 'office' ? 'badge-success' : 'badge-info'"
                 >
-                  {{ file.type === "pdf" ? "PDF" : "IMG" }}
+                  {{ file.type === "pdf" ? "PDF" : file.type === "office" ? "DOC" : "IMG" }}
                 </span>
                 <span v-if="formatSize(file.size_mb)" class="text-xs text-base-content/40">
                   {{ formatSize(file.size_mb) }}

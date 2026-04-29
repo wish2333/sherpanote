@@ -293,38 +293,40 @@ class OcrEngine:
     ) -> list[str]:
         """Convert each page of a PDF to a PNG image.
 
-        Uses PyMuPDF (fitz) for rendering. If output_dir is not provided,
+        Uses pypdfium2 for rendering. If output_dir is not provided,
         a temporary directory is created.
 
         Returns a list of paths to the generated PNG images.
         """
-        import fitz  # PyMuPDF
+        import pypdfium2 as pdfium
+        from PIL import Image
 
-        doc = fitz.open(pdf_path)
-        page_count = len(doc)
-        logger.info("Converting PDF to images: %d pages, dpi=%d", page_count, dpi)
+        with pdfium.PdfDocument(pdf_path) as doc:
+            page_count = len(doc)
+            logger.info("Converting PDF to images: %d pages, dpi=%d", page_count, dpi)
 
-        if output_dir is None:
-            tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
-            output_dir = tmp
+            if output_dir is None:
+                tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
+                output_dir = tmp
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        image_paths: list[str] = []
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            scale = dpi / 72  # PDFium renders at 72 dpi base
+            image_paths: list[str] = []
 
-        for page_idx in range(page_count):
-            page = doc[page_idx]
-            pix = page.get_pixmap(dpi=dpi)
-            img_path = str(Path(output_dir) / f"page_{page_idx + 1:04d}.png")
-            pix.save(img_path)
-            image_paths.append(img_path)
+            for page_idx in range(page_count):
+                page = doc[page_idx]
+                bitmap = page.render(scale=scale)
+                pil_image = bitmap.to_pil()
+                img_path = str(Path(output_dir) / f"page_{page_idx + 1:04d}.png")
+                pil_image.save(img_path, "PNG")
+                image_paths.append(img_path)
 
-        doc.close()
         logger.info("PDF converted: %d images generated in %s", len(image_paths), output_dir)
         return image_paths
 
     @staticmethod
     def supported_image_extensions() -> tuple[str, ...]:
-        """Return supported image file extensions for file picker."""
+        """Return supported file extensions for file picker."""
         return (
             "PNG Image (*.png)",
             "JPEG Image (*.jpg;*.jpeg)",
@@ -332,6 +334,9 @@ class OcrEngine:
             "TIFF Image (*.tiff;*.tif)",
             "WebP Image (*.webp)",
             "PDF Document (*.pdf)",
+            "Word Document (*.docx)",
+            "PowerPoint (*.pptx)",
+            "Excel Workbook (*.xlsx)",
             "All Files (*.*)",
         )
 

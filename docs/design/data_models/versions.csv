@@ -1,0 +1,7 @@
+Field Name,Type,Default,Required,Description,Validation Rules
+record_id,TEXT,N/A,Yes,Foreign key to records.id,Must match existing record id
+version,INTEGER,auto-increment,Yes,Sequential version number,Positive integer, auto-incremented per record
+transcript,TEXT,N/A,No,Versioned transcript snapshot,Free text
+segments_json,TEXT,N/A,No,Versioned timestamped segments as JSON array,Valid JSON array
+ai_results_json,TEXT,N/A,No,Versioned AI results as JSON object,Valid JSON object
+created_at,TEXT,auto-generated (ISO 8601),Yes,Version creation timestamp,ISO 8601 datetime string

@@ -137,7 +137,7 @@ export type OcrMode = "single" | "batch" | "sequential";
 export interface OcrFileEntry {
   path: string;
   name: string;
-  type: "image" | "pdf";
+  type: "image" | "pdf" | "office";
   size_mb: number;
   page_count?: number;
 }

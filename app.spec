@@ -93,9 +93,13 @@ hiddenimports = [
     # rapidocr transitive deps
     "onnxruntime",
     "shapely",
-    "fitz",
     # rapidocr brings in cv2 (opencv-python-headless)
     "cv2",
+    # document extraction backends
+    "markitdown",
+    "pdfplumber",
+    "pypdfium2",
+    "PIL",
 ]
 
 

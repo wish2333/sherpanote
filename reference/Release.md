@@ -1,3 +1,14 @@
+## 2026-04-22 - OCR 体验优化与问题修复
+
+[update-2.0.1](https://github.com/wish2333/sherpanote/releases/tag/update-2.0.1)
+
+### ✨ 新增
+- OCR 识别记录自动添加“OCR-”前缀，统一单文件、PDF 及多文件批处理的命名规则，方便快速区分与检索（自定义标题功能保持不变）
+
+### 🐛 修复
+- 修复 OCR 界面点击添加按钮无响应的问题
+- 修复 ASR 设置中通过浏览按钮切换模型目录后，需要重新进入页面才生效的问题
+
 ## 2026-04-20 - OCR识别功能上线
 
 [update-2.0.0](https://github.com/wish2333/sherpanote/releases/tag/update-2.0.0)
