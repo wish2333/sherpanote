@@ -40,9 +40,12 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Import/Export**: Support for Markdown, TXT, DOCX, and SRT formats
 
 ### OCR Image Recognition
-- **Image text recognition**: Extract text from single images, multiple images, and PDF files
-- **Multiple processing modes**: Batch processing (one record per image) and sequential processing (merged into a single record)
-- **PDF support**: Automatic page-to-image conversion and sequential OCR processing
+- **Multi-backend extraction**: Intelligent decision tree routes files to optimal backends
+- **Image text recognition**: Extract text from images using PP-OCR (RapidOCR)
+- **PDF text layer detection**: Automatically detects text-layer PDFs and uses markitdown for direct extraction
+- **Office document support**: Extract text from DOCX, PPTX, and XLSX files via markitdown
+- **Scan PDF handling**: Non-text PDFs are converted to images (pypdfium2) then OCR'd
+- **Multiple processing modes**: Batch processing (one record per file) and sequential processing (merged into a single record)
 - **Flexible model selection**: Support for PP-OCRv4 and PP-OCRv5 models with per-component Mobile/Server variants
 - **Built-in model management**: Automatic model download, caching, and lifecycle management via RapidOCR
 - **Real-time progress**: Drag-and-drop file upload with live processing progress display
@@ -69,6 +72,9 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Python 3.10+**: Core application logic
 - **sherpa-onnx**: Local-first speech recognition engine (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
 - **RapidOCR**: Local OCR engine with PP-OCRv4/v5 model support (det/rec/cls per-component configuration)
+- **markitdown**: Text-layer PDF and Office document (DOCX/PPTX/XLSX) extraction
+- **pypdfium2**: PDF-to-image rendering (BSD license)
+- **pdfplumber**: PDF text layer detection
 - **OpenAI-compatible API**: AI text processing and generation (supports OpenRouter and custom endpoints)
 - **pywebview**: Native desktop window management (via PyWebVue framework)
 - **SQLite (WAL mode)**: Local data persistence with atomic transactions
@@ -209,6 +215,10 @@ sherpanote/
 │   ├── processing_presets.py  # AI processing template management
 │   ├── gpu_detect.py          # NVIDIA CUDA detection and verification
 │   ├── ocr.py                 # OCR engine (RapidOCR wrapper, PDF conversion)
+│   ├── document_extractor.py  # Document extraction decision tree
+│   ├── text_detector.py       # File classification + PDF text layer detection
+│   ├── adapters/              # Backend adapters (ppocr, markitdown)
+│   ├── outputs/               # Unified output types (ExtractedDocument)
 │   ├── whispercpp.py          # Whisper.cpp ASR backend integration
 │   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
@@ -300,6 +310,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Next-generation speech recognition toolkit
 - **[RapidOCR](https://github.com/RapidAI/RapidOCR)**: Awesome OCR multiple programing languages toolkits
+- **[markitdown](https://github.com/microsoft/markitdown)**: Convert files to Markdown
 - **[pywebview](https://github.com/r0x0r/pywebview)**: Cross-platform native GUI library
 - **[PyWebVue](https://github.com/nicepkg/pywebvue)**: Vue + pywebview desktop framework
 - **[Vue.js](https://vuejs.org/)**: Progressive JavaScript framework

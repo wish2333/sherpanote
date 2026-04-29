@@ -14,6 +14,9 @@
 | ASR Engine | sherpa-onnx | latest |
 | ASR Alternative | whisper.cpp | latest binary |
 | OCR Engine | RapidOCR (rapidocr-onnxruntime) | latest |
+| PDF Rendering | pypdfium2 | latest |
+| PDF Text Detection | pdfplumber (via markitdown) | latest |
+| Document Extraction | markitdown | latest |
 | AI Integration | openai (Python SDK) | latest |
 | Frontend Framework | Vue 3 | 3.5+ |
 | Frontend Language | TypeScript | 5.x |
@@ -39,6 +42,13 @@ sherpanote/
     storage.py                # SQLite database layer
     asr.py                    # ASR engine (sherpa-onnx)
     ocr.py                    # OCR engine (RapidOCR)
+    document_extractor.py      # Document extraction decision tree
+    text_detector.py           # File classification + PDF text layer detection
+    adapters/
+      ppocr_adapter.py         # PP-OCR -> ExtractedDocument adapter
+      markitdown_adapter.py    # markitdown -> ExtractedDocument adapter
+    outputs/
+      unified_document.py      # ExtractedDocument unified data model
     llm.py                    # AI text processing (OpenAI API)
     model_manager.py          # ASR model download and management
     model_registry.py         # ASR model definitions

@@ -23,6 +23,31 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 
 ---
 
+## [2.1.0] - 2026-04-29 (Phase 1)
+
+### Added
+- feat(ocr): Multi-backend document extraction system with intelligent decision tree
+- feat(ocr): markitdown integration for text-layer PDF and Office document (DOCX/PPTX/XLSX) extraction
+- feat(ocr): PDF text layer detection using pdfplumber (first 3 pages, >50 chars threshold)
+- feat(ocr): Unified ExtractedDocument output model for all extraction backends
+- feat(ocr): Office file type support in OcrView (DOC badge, file picker filter)
+- feat(ocr): Adapter pattern for document extraction backends (ppocr_adapter, markitdown_adapter)
+
+### Changed
+- refactor(ocr): Replace PyMuPDF (AGPL) with pypdfium2 (BSD) for PDF-to-image rendering
+- refactor(ocr): Refactor ocr_process to use DocumentExtractor decision tree instead of direct OcrEngine calls
+- refactor(ocr): New module structure: document_extractor.py, text_detector.py, adapters/, outputs/
+
+### Decision Tree
+```
+Image -> PP-OCR (RapidOCR)
+Office (DOCX/PPTX/XLSX) -> markitdown
+PDF -> text layer detection -> markitdown (has text) / PP-OCR (no text)
+Fallback: markitdown failure on text PDF -> PP-OCR
+```
+
+---
+
 ## [2.0.1] - 2026-04-22
 
 ### Added
