@@ -154,12 +154,18 @@ def main() -> None:
         _fail(f"File not found: {file_path}")
         return
 
-    # Set JAVA_HOME if a specific Java path was provided
+    # Ensure the specified Java binary is findable via PATH.
     if java_path:
         import os as _os
+        import sys as _sys
         java_bin = str(Path(java_path).parent)
-        _os.environ["JAVA_HOME"] = str(Path(java_bin).parent)
         _os.environ["PATH"] = java_bin + _os.pathsep + _os.environ.get("PATH", "")
+        # Derive JAVA_HOME from java_path (parent of bin/).
+        # This works on Windows (bin/java.exe → jdk/).
+        # On macOS, /usr/bin/java → JAVA_HOME=/usr is invalid and causes JVM
+        # hang, so skip it there — "java" via PATH is sufficient.
+        if _sys.platform != "darwin":
+            _os.environ["JAVA_HOME"] = str(Path(java_bin).parent)
 
     try:
         result = _run_opendataloader(file_path, java_path)
