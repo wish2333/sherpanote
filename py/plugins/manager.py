@@ -181,6 +181,7 @@ class PluginManager:
         package_name: str,
         on_output: Callable[[str], None] | None = None,
         timeout: int = 600,
+        index_url: str | None = None,
     ) -> dict[str, Any]:
         """Install a package into the plugin venv using uv.
 
@@ -188,6 +189,7 @@ class PluginManager:
             package_name: Pip package name.
             on_output: Optional callback receiving output lines.
             timeout: Maximum seconds for installation.
+            index_url: Optional PyPI mirror URL.
 
         Returns:
             {"success": True} or {"success": False, "error": str}.
@@ -199,6 +201,9 @@ class PluginManager:
             "pip", "install", package_name,
             "--python", venv_python,
         ]
+
+        if index_url:
+            cmd.extend(["--index-url", index_url])
 
         logger.info("Installing plugin package: %s", package_name)
 
@@ -312,7 +317,9 @@ class PluginManager:
         """Return installation status for all known plugin packages."""
         statuses: dict[str, PackageStatus] = {}
         for display_name, pip_name in PACKAGE_NAMES.items():
-            version = self.get_installed_version(pip_name)
+            # Extract bare package name for version lookup (pip show rejects "pkg==ver")
+            bare_name = pip_name.split("==")[0].split(">=")[0].split("~=")[0].split("<")[0]
+            version = self.get_installed_version(bare_name)
             statuses[display_name] = PackageStatus(
                 name=display_name,
                 installed=version is not None,

@@ -1919,7 +1919,8 @@ class SherpaNoteAPI(Bridge):
                     self._emit("plugin_install_progress", {"message": line})
 
                 logger.info("Starting pip install for %s...", package_name)
-                result = pm.install_package(package_name, on_output=on_output)
+                index_url = self._config.plugin.pip_index_url if self._config else None
+                result = pm.install_package(package_name, on_output=on_output, index_url=index_url)
                 # Invalidate caches so get_available_backends() picks up changes
                 self._plugin_manager = None
                 self._document_extractor = None

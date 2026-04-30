@@ -84,7 +84,10 @@ class DocumentExtractor:
             artifacts = "data/docling"
             if self._plugin_config and self._plugin_config.docling_artifacts_path:
                 artifacts = self._plugin_config.docling_artifacts_path
-            self._docling_adapter = DoclingAdapter(self._plugin_manager, artifacts_path=artifacts)
+            hf_endpoint = self._plugin_config.hf_endpoint if self._plugin_config else None
+            self._docling_adapter = DoclingAdapter(
+                self._plugin_manager, artifacts_path=artifacts, hf_endpoint=hf_endpoint,
+            )
         return self._docling_adapter
 
     def _get_opendata_adapter(self):

@@ -147,6 +147,8 @@ export interface OcrFileEntry {
 export interface PluginConfig {
   manual_java_path: string | null;
   docling_artifacts_path: string | null;
+  pip_index_url: string | null;
+  hf_endpoint: string | null;
 }
 
 /** Document extraction backend selection. */

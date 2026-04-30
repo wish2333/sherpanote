@@ -24,27 +24,30 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _setup_hf_home(artifacts_path: str | None) -> str:
+def _setup_hf_home(artifacts_path: str | None, hf_endpoint: str | None = None) -> str:
     """Set HF_HOME to redirect model cache to artifacts_path."""
     import os as _os
     target = str(Path(artifacts_path or "data/docling").resolve())
     _os.makedirs(target, exist_ok=True)
     _os.environ["HF_HOME"] = target
+    if hf_endpoint:
+        _os.environ["HF_ENDPOINT"] = hf_endpoint
     return target
 
 
-def _run_docling(file_path: str, method: str, artifacts_path: str | None = None) -> dict:
+def _run_docling(file_path: str, method: str, artifacts_path: str | None = None, hf_endpoint: str | None = None) -> dict:
     """Call docling to extract document content.
 
     Args:
         file_path: Path to the input document.
         method: "text_layer" for text PDFs, "ocr" for scanned PDFs.
         artifacts_path: Optional model cache root (sets HF_HOME).
+        hf_endpoint: Optional HuggingFace mirror endpoint.
 
     Returns:
         Dict matching ExtractedDocument fields.
     """
-    _setup_hf_home(artifacts_path)
+    _setup_hf_home(artifacts_path, hf_endpoint)
 
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -100,7 +103,7 @@ def _run_docling(file_path: str, method: str, artifacts_path: str | None = None)
     }
 
 
-def _pre_download_models(artifacts_path: str | None = None) -> dict:
+def _pre_download_models(artifacts_path: str | None = None, hf_endpoint: str | None = None) -> dict:
     """Pre-download docling models by triggering a conversion.
 
     HF_HOME is redirected to artifacts_path, so docling downloads
@@ -109,7 +112,7 @@ def _pre_download_models(artifacts_path: str | None = None) -> dict:
     import tempfile as _tf
     import os as _os
 
-    target = _setup_hf_home(artifacts_path)
+    target = _setup_hf_home(artifacts_path, hf_endpoint)
     _emit_progress(0, f"Model directory: {target}")
 
     minimal_pdf = (
@@ -127,7 +130,7 @@ def _pre_download_models(artifacts_path: str | None = None) -> dict:
         with open(tmp_path, "wb") as f:
             f.write(minimal_pdf)
         _emit_progress(10, "Downloading docling models...")
-        _run_docling(tmp_path, "text_layer", artifacts_path)
+        _run_docling(tmp_path, "text_layer", artifacts_path, hf_endpoint)
         _emit_progress(100, f"Models ready in {target}")
     finally:
         if tmp_path:
@@ -163,11 +166,12 @@ def main() -> None:
 
     command = args.get("command", "extract")
     artifacts_path = args.get("artifacts_path")
+    hf_endpoint = args.get("hf_endpoint")
 
     # Route to command handler
     if command == "pre_download":
         try:
-            result = _pre_download_models(artifacts_path)
+            result = _pre_download_models(artifacts_path, hf_endpoint)
             json.dump({"success": True, "result": result}, sys.stdout)
             print()
         except Exception as exc:
@@ -188,7 +192,7 @@ def main() -> None:
         return
 
     try:
-        result = _run_docling(file_path, method, artifacts_path)
+        result = _run_docling(file_path, method, artifacts_path, hf_endpoint)
         json.dump({"success": True, "result": result}, sys.stdout)
         print()  # trailing newline
     except Exception as exc:

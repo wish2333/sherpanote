@@ -32,9 +32,11 @@ class DoclingAdapter:
         self,
         plugin_manager: PluginManager,
         artifacts_path: str | None = None,
+        hf_endpoint: str | None = None,
     ) -> None:
         self._manager = plugin_manager
         self._artifacts_path = artifacts_path
+        self._hf_endpoint = hf_endpoint
 
     def is_available(self) -> bool:
         """Check if docling is installed in the plugin venv."""
@@ -66,6 +68,7 @@ class DoclingAdapter:
             args={
                 "command": "pre_download",
                 "artifacts_path": self._artifacts_path,
+                "hf_endpoint": self._hf_endpoint,
             },
             timeout=1800,
         )
@@ -84,6 +87,7 @@ class DoclingAdapter:
                 "file_path": file_path,
                 "method": method,
                 "artifacts_path": self._artifacts_path,
+                "hf_endpoint": self._hf_endpoint,
             },
             timeout=600,
         )

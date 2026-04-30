@@ -171,6 +171,67 @@ const doclingArtifactsPath = computed({
   },
 });
 
+// ---- Mirror source options ----
+const PIP_MIRRORS = [
+  { value: "", label: "官方 PyPI" },
+  { value: "https://pypi.tuna.tsinghua.edu.cn/simple", label: "清华大学 TUNA" },
+  { value: "https://mirrors.aliyun.com/pypi/simple", label: "阿里云" },
+  { value: "https://mirrors.cloud.tencent.com/pypi/simple", label: "腾讯云" },
+  { value: "__custom__", label: "自定义" },
+] as const;
+
+const HF_ENDPOINTS = [
+  { value: "", label: "官方 HuggingFace" },
+  { value: "https://hf-mirror.com", label: "HF-Mirror" },
+  { value: "__custom__", label: "自定义" },
+] as const;
+
+const pipMirrorKey = computed({
+  get: () => {
+    const url = props.pluginConfig.pip_index_url ?? "";
+    return PIP_MIRRORS.find((m) => m.value === url)?.value ?? "__custom__";
+  },
+  set: (v) => {
+    emit("update:pluginConfig", {
+      ...props.pluginConfig,
+      pip_index_url: v === "__custom__" ? props.pluginConfig.pip_index_url : (v || null),
+    });
+  },
+});
+
+const pipIndexUrl = computed({
+  get: () => props.pluginConfig.pip_index_url ?? "",
+  set: (v) => {
+    emit("update:pluginConfig", {
+      ...props.pluginConfig,
+      pip_index_url: v || null,
+    });
+  },
+});
+
+const hfEndpointKey = computed({
+  get: () => {
+    const url = props.pluginConfig.hf_endpoint ?? "";
+    return HF_ENDPOINTS.find((m) => m.value === url)?.value ?? "__custom__";
+  },
+  set: (v) => {
+    emit("update:pluginConfig", {
+      ...props.pluginConfig,
+      hf_endpoint: v === "__custom__" ? props.pluginConfig.hf_endpoint : (v || null),
+    });
+  },
+});
+
+const hfEndpoint = computed({
+  get: () => props.pluginConfig.hf_endpoint ?? "",
+  set: (v) => {
+    emit("update:pluginConfig", {
+      ...props.pluginConfig,
+      hf_endpoint: v || null,
+    });
+  },
+});
+
 function handlePickJavaPath() {
   pickFile([
     "可执行文件 (*.exe)",
@@ -598,6 +659,72 @@ onMounted(() => {
           <label class="label">
             <span class="label-text-alt text-base-content/50 break-all">
               留空则使用默认目录 (data\docling)。点击"下载模型"可将模型下载到指定目录。
+            </span>
+          </label>
+        </div>
+
+        <!-- PyPI Mirror Source -->
+        <div class="form-control w-full max-w-xl mt-2">
+          <label class="label">
+            <span class="label-text font-medium">PyPI 镜像源</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <select
+              v-model="pipMirrorKey"
+              class="select select-bordered select-sm flex-1"
+            >
+              <option
+                v-for="m in PIP_MIRRORS"
+                :key="m.value || 'default'"
+                :value="m.value"
+              >
+                {{ m.label }}
+              </option>
+            </select>
+          </div>
+          <input
+            v-if="pipMirrorKey === '__custom__'"
+            v-model="pipIndexUrl"
+            type="text"
+            placeholder="https://your-mirror.com/simple"
+            class="input input-bordered input-sm w-full max-w-xl mt-1"
+          />
+          <label class="label">
+            <span class="label-text-alt text-base-content/50">
+              国内用户建议选择镜像源以加速插件安装。
+            </span>
+          </label>
+        </div>
+
+        <!-- HuggingFace Mirror Source -->
+        <div class="form-control w-full max-w-xl mt-2">
+          <label class="label">
+            <span class="label-text font-medium">HuggingFace 镜像源</span>
+          </label>
+          <div class="flex items-center gap-2">
+            <select
+              v-model="hfEndpointKey"
+              class="select select-bordered select-sm flex-1"
+            >
+              <option
+                v-for="m in HF_ENDPOINTS"
+                :key="m.value || 'default'"
+                :value="m.value"
+              >
+                {{ m.label }}
+              </option>
+            </select>
+          </div>
+          <input
+            v-if="hfEndpointKey === '__custom__'"
+            v-model="hfEndpoint"
+            type="text"
+            placeholder="https://your-hf-mirror.com"
+            class="input input-bordered input-sm w-full max-w-xl mt-1"
+          />
+          <label class="label">
+            <span class="label-text-alt text-base-content/50">
+              影响 Docling 模型下载。国内用户建议选择 HF-Mirror。
             </span>
           </label>
         </div>

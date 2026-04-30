@@ -72,6 +72,8 @@ class PluginConfig:
 
     manual_java_path: str | None = None
     docling_artifacts_path: str | None = None  # Custom docling model directory
+    pip_index_url: str | None = None  # PyPI mirror URL (e.g. TUNA, Aliyun)
+    hf_endpoint: str | None = None  # HuggingFace mirror endpoint (e.g. hf-mirror.com)
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,8 @@ class AppConfig:
             "plugin": {
                 "manual_java_path": self.plugin.manual_java_path,
                 "docling_artifacts_path": self.plugin.docling_artifacts_path,
+                "pip_index_url": self.plugin.pip_index_url,
+                "hf_endpoint": self.plugin.hf_endpoint,
             },
             "document": {
                 "text_pdf_engine": self.document.text_pdf_engine,
@@ -243,6 +247,8 @@ class AppConfig:
             plugin=PluginConfig(
                 manual_java_path=plugin_d.get("manual_java_path"),
                 docling_artifacts_path=plugin_d.get("docling_artifacts_path"),
+                pip_index_url=plugin_d.get("pip_index_url"),
+                hf_endpoint=plugin_d.get("hf_endpoint"),
             ),
             document=DocumentConfig(
                 text_pdf_engine=document_d.get("text_pdf_engine", "markitdown"),

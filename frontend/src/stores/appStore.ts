@@ -96,6 +96,8 @@ export const useAppStore = defineStore("app", () => {
   const pluginConfig = ref<PluginConfig>({
     manual_java_path: null,
     docling_artifacts_path: null,
+    pip_index_url: null,
+    hf_endpoint: null,
   });
 
   /* ---- Document extraction config ---- */
