@@ -18,8 +18,27 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
+
+# Windows: huggingface_hub creates symlinks in its cache which requires
+# admin privileges (WinError 1314).  Patch os.symlink to fall back to
+# file copy when privilege is denied.
+if sys.platform == "win32":
+    _original_symlink = os.symlink
+
+    def _safe_symlink(src, dst, *args, **kwargs):
+        try:
+            return _original_symlink(src, dst, *args, **kwargs)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                shutil.copy2(src, dst)
+                return
+            raise
+
+    os.symlink = _safe_symlink
 
 logger = logging.getLogger(__name__)
 
