@@ -26,19 +26,30 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _get_internal_dir() -> Path:
+    """Return the resources directory used by PyInstaller in frozen mode.
+
+    On macOS .app bundle: {base}/../Resources/  (BUNDLE puts files here directly)
+    On other platforms:  {base}/_internal/      (COLLECT creates _internal subdir)
+    """
+    base = _get_base_dir()
+    if sys.platform == "darwin":
+        return base.parent / "Resources"
+    return base / "_internal"
+
+
 def get_bundled_python() -> Path:
     """Return path to the bundled Python executable.
 
     In frozen mode: {base_dir}/python/python.exe (Windows) or python (Unix).
     In development: sys.executable (system Python).
     """
-    base = _get_base_dir()
     if getattr(sys, "frozen", False):
-        # PyInstaller onedir: all collected files go into _internal/
+        internal = _get_internal_dir()
         if sys.platform == "win32":
-            python = base / "_internal" / "python" / "python.exe"
+            python = internal / "python" / "python.exe"
         else:
-            python = base / "_internal" / "python" / "bin" / "python3"
+            python = internal / "python" / "bin" / "python3"
         if python.exists():
             return python
         raise FileNotFoundError(
@@ -54,11 +65,10 @@ def get_bundled_uv() -> Path:
     In frozen mode: {base_dir}/uv.exe (Windows) or uv (Unix).
     In development: uses shutil.which to find system uv.
     """
-    base = _get_base_dir()
     if getattr(sys, "frozen", False):
         ext = ".exe" if sys.platform == "win32" else ""
-        # PyInstaller onedir: all collected files go into _internal/
-        uv = base / "_internal" / f"uv{ext}"
+        internal = _get_internal_dir()
+        uv = internal / f"uv{ext}"
         if uv.exists():
             return uv
         logger.warning("Bundled uv not found at %s, falling back to system uv", uv)
