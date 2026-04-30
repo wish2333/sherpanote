@@ -9,7 +9,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { onEvent, pickImageFiles, ocrProcess, cancelOcr, getImagePreview, call, getAvailableBackends, detectPdfTextLayer } from "../bridge";
 import { useAppStore } from "../stores/appStore";
-import type { OcrFileEntry, OcrMode, DocumentConfig } from "../types";
+import type { OcrFileEntry, OcrMode, DocumentConfig, PluginConfig } from "../types";
 
 const router = useRouter();
 const store = useAppStore();

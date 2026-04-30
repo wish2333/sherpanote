@@ -154,9 +154,21 @@ class Storage:
         return self._row_to_dict(row) if row else None
 
     def list(self, filter: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        """List records with optional filtering and sorting."""
+        """List records with optional filtering and sorting.
+
+        Returns summary fields only (excludes full transcript and large JSON
+        blobs) so that the home page stays fast even with many records.
+        """
         conn = self._get_conn()
-        query = "SELECT * FROM records WHERE 1=1"
+
+        summary_cols = (
+            "id, title, audio_path, category, duration_seconds, "
+            "created_at, updated_at, "
+            "SUBSTR(transcript, 1, 200) AS transcript_preview, "
+            "CASE WHEN ai_results_json != '{}' THEN 1 ELSE 0 END AS has_ai"
+        )
+
+        query = f"SELECT {summary_cols} FROM records WHERE 1=1"
         params: list[Any] = []
 
         if filter:
@@ -176,7 +188,7 @@ class Storage:
         query += f" ORDER BY {sort_by} {sort_order}"
 
         rows = conn.execute(query, params).fetchall()
-        return [self._row_to_dict(r) for r in rows]
+        return [dict(r) for r in rows]
 
     def delete(self, record_id: str) -> bool:
         """Delete a record and its versions."""

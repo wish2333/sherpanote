@@ -546,7 +546,7 @@ onMounted(() => {
           <label v-if="javaResult" class="label">
             <span v-if="javaResult?.found" class="label-text-alt text-success break-all">
               Java {{ javaResult?.version }}
-              <span class="opacity-70" :title="javaResult?.path">{{ javaResult?.path }}</span>
+              <span class="opacity-70" :title="javaResult?.path ?? undefined">{{ javaResult?.path }}</span>
             </span>
             <span v-else class="label-text-alt text-error">
               {{ javaResult?.error ?? "未检测到 Java 11+" }}

@@ -49,7 +49,12 @@ export async function call<T = unknown>(
   method: string,
   ...args: unknown[]
 ): Promise<ApiResponse<T>> {
-  const api = getRawApi();
+  let api: PyWebViewApi;
+  try {
+    api = getRawApi();
+  } catch {
+    return { success: false, error: "pywebview API not available" };
+  }
   if (!(method in api)) {
     return { success: false, error: `Method '${method}' not found on bridge` };
   }

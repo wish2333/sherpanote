@@ -177,6 +177,11 @@ class AppConfig:
     @staticmethod
     def from_dict(data: dict[str, Any]) -> AppConfig:
         """Deserialize from dict. Missing keys fall back to defaults."""
+
+        def _str(d: dict, key: str, default: str = "") -> str:
+            val = d.get(key, default)
+            return val if isinstance(val, str) else str(val) if val is not None else default
+
         asr_d = data.get("asr", {})
         ai_d = data.get("ai", {})
         ocr_d = data.get("ocr", {})
@@ -196,7 +201,7 @@ class AppConfig:
         return AppConfig(
             data_dir=data.get("data_dir", _DEFAULT_DATA_DIR),
             asr=AsrConfig(
-                model_dir=asr_d.get("model_dir", _DEFAULT_MODELS_DIR),
+                model_dir=asr_d.get("model_dir") or _DEFAULT_MODELS_DIR,
                 language=asr_d.get("language", "auto"),
                 sample_rate=asr_d.get("sample_rate", 16000),
                 use_gpu=asr_d.get("use_gpu", False),
@@ -221,9 +226,9 @@ class AppConfig:
             ),
             ai=AiConfig(
                 provider=ai_d.get("provider", "openai"),
-                model=ai_d.get("model", "gpt-4o-mini"),
+                model=_str(ai_d, "model", "gpt-4o-mini").strip(),
                 api_key=ai_d.get("api_key"),
-                base_url=ai_d.get("base_url"),
+                base_url=_str(ai_d, "base_url").rstrip("/") or None,
                 temperature=ai_d.get("temperature", 0.7),
                 max_tokens=ai_d.get("max_tokens", 4096),
             ),

@@ -585,6 +585,33 @@ class SherpaNoteAPI(Bridge):
             record["version"] = self._storage._get_current_version(record["id"])
         return record
 
+    def _annotate_records(self, records: list[dict]) -> list[dict]:
+        """Batch-annotate records with computed fields."""
+        if not records:
+            return records
+        audio_dir = str(Path(self._config.data_dir).resolve() / "audio")
+        # Batch-fetch version numbers for all records.
+        record_ids = [r["id"] for r in records]
+        id_list = ",".join("?" * len(record_ids))
+        conn = self._storage._get_conn()
+        version_rows = conn.execute(
+            f"SELECT record_id, MAX(version) AS v FROM versions WHERE record_id IN ({id_list}) GROUP BY record_id",
+            record_ids,
+        ).fetchall()
+        version_map = {row["record_id"]: row["v"] for row in version_rows}
+        for r in records:
+            audio_path = r.get("audio_path", "")
+            if audio_path:
+                try:
+                    resolved = str(Path(audio_path).resolve())
+                    r["can_retranscribe"] = resolved.startswith(audio_dir)
+                except (OSError, ValueError):
+                    r["can_retranscribe"] = False
+            else:
+                r["can_retranscribe"] = False
+            r["version"] = version_map.get(r["id"], 0)
+        return records
+
     @expose
     def get_record(self, record_id: str) -> dict:
         """Fetch a single record by ID."""
@@ -598,7 +625,7 @@ class SherpaNoteAPI(Bridge):
     def list_records(self, filter: dict = None) -> dict:
         """List records with optional filtering."""
         records = self._storage.list(filter)
-        records = [self._annotate_record(r) for r in records]
+        records = self._annotate_records(records)
         return {"success": True, "data": records}
 
     @expose

@@ -1286,9 +1286,9 @@ feat(plugins): 实现插件运行时架构与后端适配器
 
   1. opendata_runner 临时文件清理 -- _run_opendataloader 读取完生成文件后立即删除它们
   2. 导出备份默认不勾选应用配置 -- include_config 默认值改为 false。备份本身已涵盖 plugin/document 配置（通过
-    config.json 导出完整 AppConfig），无需额外修改
+      config.json 导出完整 AppConfig），无需额外修改
   3. OcrView 全屏拖拽 -- 移除了专用的上传区域卡片，替换为全屏拖拽覆盖层 + 紧凑工具栏（标题输入 +
-    选择文件按钮）。拖拽支持多文件
+      选择文件按钮）。拖拽支持多文件
   4. opendata_runner 扫描件测试 -- 不支持。扫描 PDF 只能输出页码和图片引用，没有实际文本。扫描件路由应继续走 ppocr
 
 - 设置页中持久化了但是OCR页中PDF引擎选择没有持久化，每次打开都是显示默认的设置，打开设置页之后才更新
@@ -1494,7 +1494,7 @@ General
   #4418  12:37 PM  🔵  rapidocr package includes bundled ONNX models
 ```
 
-## 📝 Commit Message
+# 📝 Commit Message
 
 ```
 feat(ui): 插件管理设置界面与引擎选择
@@ -1510,7 +1510,7 @@ feat(ui): 插件管理设置界面与引擎选择
 - Docling默认使用RapidOCR进行OCR识别
 ```
 
-## 🚀 Release Notes
+# 🚀 Release Notes
 
 ```
 ## 2026-04-30 - 插件管理与文档引擎设置界面

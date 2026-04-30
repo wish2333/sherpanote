@@ -26,6 +26,7 @@ export interface TranscriptRecord {
   title: string;
   audio_path: string | null;
   can_retranscribe?: boolean;
+  has_ai?: number;
   transcript: string;
   segments: Segment[];
   ai_results: AiResults;

@@ -36,7 +36,10 @@ function formatDuration(seconds: number): string {
 }
 
 function hasAiResults(record: TranscriptRecord): boolean {
-  return record.ai_results && Object.keys(record.ai_results).length > 0;
+  // List mode: backend returns has_ai as a number field.
+  if ("has_ai" in record) return !!record.has_ai;
+  // Detail mode: full ai_results object available.
+  return !!record.ai_results && Object.keys(record.ai_results).length > 0;
 }
 </script>
 
