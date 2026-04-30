@@ -31,14 +31,16 @@ def _run_opendataloader(file_path: str, java_path: str | None = None) -> dict:
         Dict matching ExtractedDocument fields.
     """
     import os as _os
+    import tempfile as _tempfile
     from pathlib import Path as _Path
 
     from opendataloader_pdf import run_jar
 
     _emit_progress(0, f"Converting {file_path} with opendataloader-pdf")
 
-    # Output to data/temp so user can inspect; use --format markdown
-    tmpdir = str(_Path("data") / "temp")
+    # Use system temp dir — relative paths like "data/temp" resolve
+    # unpredictably in packaged apps (macOS Finder sets cwd to /).
+    tmpdir = str(_Path(_tempfile.gettempdir()) / "sherpanote_opendata")
     _os.makedirs(tmpdir, exist_ok=True)
 
     # Clean up previous output with same stem name
