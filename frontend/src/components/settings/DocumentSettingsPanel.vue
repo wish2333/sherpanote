@@ -604,12 +604,12 @@ onMounted(() => {
             </button>
           </div>
           <!-- Detection result -->
-          <label v-if="javaResult" class="label">
-            <span v-if="javaResult?.found" class="label-text-alt text-success break-all">
+          <div v-if="javaResult" class="mt-1">
+            <span v-if="javaResult?.found" class="text-xs text-success break-all">
               Java {{ javaResult?.version }}
               <span class="opacity-70" :title="javaResult?.path ?? undefined">{{ javaResult?.path }}</span>
             </span>
-            <span v-else class="label-text-alt text-error">
+            <span v-else class="text-xs text-error break-words">
               {{ javaResult?.error ?? "未检测到 Java 11+" }}
               -- 请从
               <a
@@ -622,7 +622,7 @@ onMounted(() => {
               </a>
               安装
             </span>
-          </label>
+          </div>
         </div>
 
         <!-- Docling Model Directory -->
