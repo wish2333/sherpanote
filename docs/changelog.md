@@ -52,6 +52,9 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - refactor(ocr): Scanned PDFs automatically skip opendataloader, use OCR directly
 - perf(storage): Optimized list queries with reduced redundant queries for faster loading
 - refactor(plugins): Auto-cleanup of opendataloader-pdf temp files after processing
+- refactor(config): Data directory restructured - logs, audio, export, temp, docling models consolidated under unified `data/` directory
+- refactor(plugins): Plugin subprocess environment auto-construction with correct PYTHONPATH
+- fix(build): macOS .app bundle model path detection and structure check script
 
 ### Fixed
 - fix(ocr): Fix engine selection cache not invalidating on switch
@@ -76,6 +79,13 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - fix(core): Model directory configuration issue preventing local model discovery
 - fix(ocr): pypdfium2 segfault when importing PDFs on macOS
 - fix(settings): Java detection result display issue in document settings panel
+- fix(plugins): Windows symlink privilege error during HuggingFace model download (fallback to file copy)
+- fix(plugins): Docling model pre-download failure in packaged app due to relative path issues
+- fix(config): Data directory paths inconsistent between development and packaged environments
+- fix(build): PyInstaller frozen mode resource path resolution for build-time paths
+- fix(plugins): Plugin subprocess PYTHONPATH missing py package parent directory
+- fix(opendata_runner): Relative temp path causing issues in packaged application
+- fix(opendata_runner): Java binary not discoverable via PATH on non-macOS platforms (auto-set JAVA_HOME)
 
 ### Decision Tree
 ```

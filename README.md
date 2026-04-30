@@ -231,7 +231,7 @@ sherpanote/
 │   ├── ocr.py                 # OCR engine (RapidOCR wrapper, PDF conversion)
 │   ├── document_extractor.py  # Document extraction decision tree
 │   ├── text_detector.py       # File classification + PDF text layer detection
-│   ├── adapters/              # Backend adapters (ppocr, markitdown)
+│   ├── adapters/              # Backend adapters (ppocr, markitdown, docling, opendata)
 │   ├── outputs/               # Unified output types (ExtractedDocument)
 │   ├── plugins/               # Plugin system
 │   │   └── runners/           # Plugin runners (docling, opendataloader)
@@ -286,12 +286,19 @@ See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
 - Fixed AI processing status indicator occasionally missing in record list
 - Fixed model call failure due to whitespace in model name
 - Fixed pypdfium2 segfault when importing PDFs on macOS
+- Fixed Windows symlink privilege error during HuggingFace model download (fallback to file copy)
+- Fixed Docling model pre-download failure in packaged app due to path issues
+- Fixed data directory paths inconsistent between development and packaged environments
+- Fixed PyInstaller frozen mode resource path resolution for build-time paths
+- Fixed opendataloader-pdf Java binary not found in PATH on Windows/Linux (JAVA_HOME now set automatically)
 
 ### Optimizations
 
 - Scanned PDFs automatically skip opendataloader, use OCR directly
 - Significantly improved record list loading speed
 - Auto-cleanup of opendataloader-pdf temp files after processing
+- Data directory restructured: logs, audio, export, temp, and docling models consolidated under unified `data/` directory
+- Plugin subprocess environment auto-construction with correct PYTHONPATH
 
 [2026-04-22 - OCR Fix]
 

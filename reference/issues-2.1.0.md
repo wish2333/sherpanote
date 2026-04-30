@@ -1632,10 +1632,17 @@ feat(plugins): 添加插件运行时系统和多后端文档提取功能
 - 修复设置中模型目录配置异常导致找不到本地模型的问题
 - 修复MAC端导入PDF时pypdfium2导致的段错误
 - 更新数据目录路径以支持打包应用的环境
+- 修复 Windows 下 HuggingFace 模型下载时符号链接权限错误（回退到文件复制）
+- 修复打包应用中 Docling 模型预下载因路径问题失败
+- 修复开发环境和打包环境中数据目录路径不一致的问题
+- 修复 PyInstaller 冻结模式下构建时资源路径解析错误
+- 修复 Windows/Linux 下 opendataloader-pdf 因 Java 二进制文件不在 PATH 中导致调用失败（自动设置 JAVA_HOME）
 
 ### ⚡ 优化
 - 插件与文档配置修改后自动保存，无需手动点击保存
 - opendataloader-pdf 临时文件处理完毕后自动清理
 - 扫描件 PDF 自动跳过 opendataloader，直接使用 OCR 引擎
 - 大幅提升历史记录列表的加载速度，记录越多提速越明显
+- 数据目录重构：日志、音频、导出、临时文件和 Docling 模型统一归入 `data/` 目录
+- 插件子进程环境自动构建，确保 PYTHONPATH 正确
 ```
