@@ -301,7 +301,8 @@ class OcrEngine:
         import pypdfium2 as pdfium
         from PIL import Image
 
-        with pdfium.PdfDocument(pdf_path) as doc:
+        doc = pdfium.PdfDocument(pdf_path)
+        try:
             page_count = len(doc)
             logger.info("Converting PDF to images: %d pages, dpi=%d", page_count, dpi)
 
@@ -315,11 +316,17 @@ class OcrEngine:
 
             for page_idx in range(page_count):
                 page = doc[page_idx]
-                bitmap = page.render(scale=scale)
-                pil_image = bitmap.to_pil()
+                try:
+                    bitmap = page.render(scale=scale)
+                    pil_image = bitmap.to_pil()
+                finally:
+                    # Explicitly close page to avoid double-free in PdfDocument finalizer
+                    page.close()
                 img_path = str(Path(output_dir) / f"page_{page_idx + 1:04d}.png")
                 pil_image.save(img_path, "PNG")
                 image_paths.append(img_path)
+        finally:
+            doc.close()
 
         logger.info("PDF converted: %d images generated in %s", len(image_paths), output_dir)
         return image_paths
