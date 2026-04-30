@@ -34,13 +34,17 @@ def get_bundled_python() -> Path:
     """
     base = _get_base_dir()
     if getattr(sys, "frozen", False):
+        # PyInstaller onedir: all collected files go into _internal/
         if sys.platform == "win32":
-            python = base / "python" / "python.exe"
+            python = base / "_internal" / "python" / "python.exe"
         else:
-            python = base / "python" / "bin" / "python3"
+            python = base / "_internal" / "python" / "bin" / "python3"
         if python.exists():
             return python
-        logger.warning("Bundled Python not found at %s, falling back to sys.executable", python)
+        raise FileNotFoundError(
+            f"Bundled Python not found at: {python}. "
+            "Rebuild the application with --with-plugins flag."
+        )
     return Path(sys.executable).resolve()
 
 
@@ -53,7 +57,8 @@ def get_bundled_uv() -> Path:
     base = _get_base_dir()
     if getattr(sys, "frozen", False):
         ext = ".exe" if sys.platform == "win32" else ""
-        uv = base / f"uv{ext}"
+        # PyInstaller onedir: all collected files go into _internal/
+        uv = base / "_internal" / f"uv{ext}"
         if uv.exists():
             return uv
         logger.warning("Bundled uv not found at %s, falling back to system uv", uv)

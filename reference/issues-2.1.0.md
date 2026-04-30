@@ -1586,6 +1586,17 @@ feat(settings): 添加 PyPI 和 HuggingFace 镜像源配置选项
 - 在插件安装时使用配置的 PyPI 镜像源地址
 - 在 Docling 模型下载时使用配置的 HuggingFace 镜像端点
 - 更新相关类型定义和配置结构以支持新的镜像源配置项
+
+feat(plugins): 添加插件运行时系统和多后端文档提取功能
+
+添加了完整的插件系统架构，包括捆绑Python + uv子进程执行环境，
+支持docling和opendataloader-pdf等可选后端引擎。
+
+- 新增文档设置面板：PDF处理模式选择、后端管理、Java环境自动检测
+- 新增多后端文档提取系统：智能决策树(markitdown, PP-OCR, docling, opendataloader-pdf)
+- 新增插件系统：运行时隔离执行，PyPI/HF镜像源配置，Docling模型预下载
+- 修复PDF引擎切换、插件安装进度、Java路径配置等多个问题
+- 优化扫描PDF自动跳过opendataloader、大幅提升记录列表加载速度
 ```
 
 # 🚀 Release Notes

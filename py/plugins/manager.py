@@ -9,8 +9,14 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable
+
+# Windows: prevent subprocess calls from flashing a console window.
+_SUBPROCESS_FLAGS = 0
+if sys.platform == "win32":
+    _SUBPROCESS_FLAGS = 0x08000000  # CREATE_NO_WINDOW
 
 from py.plugins.paths import (
     get_bundled_python,
@@ -69,6 +75,9 @@ class PluginManager:
     def ensure_venv(self) -> str:
         """Ensure the plugin venv exists, creating it if necessary.
 
+        Uses uv venv (bundled with the app) instead of python -m venv,
+        which is more reliable with the relocated bundled Python in frozen mode.
+
         Returns:
             Path to the venv Python executable.
         """
@@ -80,18 +89,20 @@ class PluginManager:
         if marker.exists():
             return venv_python
 
-        # Create venv
+        # Create venv via uv venv (avoids relying on bundled Python's venv module)
         logger.info("Creating plugin venv at %s", venv_dir)
         venv_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             result = subprocess.run(
-                [self.python_path, "-m", "venv", str(venv_dir)],
+                [self.uv_path, "venv", str(venv_dir),
+                 "--python", self.python_path],
                 capture_output=True,
                 text=True,
                 timeout=60,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=_SUBPROCESS_FLAGS,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError("Timed out creating plugin venv")
@@ -99,34 +110,14 @@ class PluginManager:
             raise RuntimeError(f"Failed to create plugin venv: {exc}")
 
         if result.returncode != 0:
+            stderr = result.stderr.strip()
+            logger.error("uv venv failed: %s", stderr)
             raise RuntimeError(
-                f"Failed to create plugin venv: {result.stderr.strip()}"
+                f"Failed to create plugin venv: {stderr}"
             )
 
-        # Write marker file
+        # Write marker file to indicate venv is ready
         marker.touch()
-
-        # Install uv into the venv for faster pip operations
-        logger.info("Installing uv into plugin venv")
-        try:
-            subprocess.run(
-                [venv_python, "-m", "ensurepip", "--upgrade"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                encoding="utf-8",
-                errors="replace",
-            )
-            subprocess.run(
-                [venv_python, "-m", "pip", "install", "uv", "--quiet"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                encoding="utf-8",
-                errors="replace",
-            )
-        except Exception as exc:
-            logger.warning("Could not install uv in plugin venv: %s", exc)
 
         logger.info("Plugin venv created: %s", venv_python)
         return venv_python
@@ -164,6 +155,7 @@ class PluginManager:
                 timeout=30,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=_SUBPROCESS_FLAGS,
             )
             if result.returncode != 0:
                 return None
@@ -216,6 +208,7 @@ class PluginManager:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
+                creationflags=_SUBPROCESS_FLAGS,
             )
 
             # Stream output line by line for real-time progress
@@ -271,6 +264,7 @@ class PluginManager:
                 timeout=60,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=_SUBPROCESS_FLAGS,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}

@@ -20,7 +20,7 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 
 ---
 
-## [2.1.0] - 2026-04-30 (Phase 1-3)
+## [2.1.0] - 2026-04-30
 
 ### Added
 - feat(ocr): Multi-backend document extraction system with intelligent decision tree
@@ -35,12 +35,23 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - feat(plugins): bridge.ts and Pinia store extended with plugin/document config support
 - feat(ui): Fullscreen drag-and-drop layout for OCR page with auto PDF text layer detection in file list
 - feat(plugins): Docling default OCR backend configured to use RapidOCR
+- feat(settings): OCR/Document settings panel with PDF mode selection, backend management, and Java environment auto-detection
+- feat(settings): PyPI and HuggingFace mirror source configuration for plugin installation and model downloads
+- feat(plugins): Model pre-download for Docling with configurable model directory
+- feat(plugins): Destroy plugin virtual environment with confirmation dialog
+- feat(ocr): Upload file format validation with user-friendly error messages
+- feat(ocr): Engine fallback warning when configured engine is unavailable
+- feat(ui): Auto-save for plugin and document configuration changes
+- feat(core): AI processing support for 30+ audio and video file formats via FFmpeg
 
 ### Changed
 - refactor(ocr): Replace PyMuPDF (AGPL) with pypdfium2 (BSD) for PDF-to-image rendering
 - refactor(ocr): Refactor ocr_process to use DocumentExtractor decision tree instead of direct OcrEngine calls
 - refactor(ocr): New module structure: document_extractor.py, text_detector.py, adapters/, outputs/
 - refactor(ui): Settings changes auto-save with full Chinese localization
+- refactor(ocr): Scanned PDFs automatically skip opendataloader, use OCR directly
+- perf(storage): Optimized list queries with reduced redundant queries for faster loading
+- refactor(plugins): Auto-cleanup of opendataloader-pdf temp files after processing
 
 ### Fixed
 - fix(ocr): Fix engine selection cache not invalidating on switch
@@ -51,6 +62,20 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - fix(plugins): Fix Docling v2 API compatibility
 - fix(plugins): Fix opendata runner output format
 - fix(ocr): Fix temp file cleanup in opendata runner
+- fix(ocr): PDF engine switch not taking effect after change
+- fix(plugins): Installation progress unresponsive during package download
+- fix(ocr): opendataloader-pdf producing empty output after processing
+- fix(settings): Environment configuration text overflow in container
+- fix(ocr): OCR page engine selection not syncing with saved config on startup
+- fix(plugins): Engine options still showing as uninstalled after installation
+- fix(backup): Export backup defaulting to select app configuration
+- fix(ocr): Drag-and-drop upload area not covering full screen
+- fix(core): Home page stuck on loading animation after packaging
+- fix(ui): AI processing status indicator occasionally missing in record list
+- fix(core): Model call failure due to whitespace in model name
+- fix(core): Model directory configuration issue preventing local model discovery
+- fix(ocr): pypdfium2 segfault when importing PDFs on macOS
+- fix(settings): Java detection result display issue in document settings panel
 
 ### Decision Tree
 ```

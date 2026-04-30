@@ -149,6 +149,10 @@ uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
 # Build with pre-downloaded OCR models for offline use (directory mode only)
 uv run build.py --with-ocr-models
 
+# Build with bundled plugin runtime (python-build-standalone + uv, directory mode only)
+# Enables optional backends: docling, opendataloader-pdf
+uv run build.py --with-plugins
+
 # Build with CUDA GPU acceleration (NVIDIA, requires CUDA toolkit + cuDNN)
 uv run build.py --cuda
 uv run build.py --cuda --cuda-variant cuda12.cudnn9  # CUDA 12.x + cuDNN 9
@@ -255,6 +259,39 @@ Configuration can be modified through the **Settings** interface.
 ## Changelog
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
+
+[2026-04-30 - Plugin System & Document Engine]
+
+### New
+
+- OCR/Document settings panel with PDF mode selection, backend management, and Java environment auto-detection
+- Multi-backend document extraction system with intelligent decision tree (markitdown, PP-OCR, docling, opendataloader-pdf)
+- Plugin system with runtime isolation: bundled Python + uv subprocess execution
+- Fullscreen drag-and-drop layout for OCR page with auto PDF text layer detection
+- PyPI and HuggingFace mirror source configuration for plugin installation
+- Docling model pre-download with configurable model directory
+- Upload file format validation with user-friendly error messages
+- Engine fallback warning when configured engine is unavailable
+
+### Fixes
+
+- Fixed PDF engine switch not taking effect after change
+- Fixed plugin install/uninstall with no log output and unresponsive progress
+- Fixed custom Java path not actually taking effect
+- Fixed opendataloader-pdf producing empty output after processing
+- Fixed OCR engine selection not syncing with saved config on startup
+- Fixed engine options still showing as uninstalled after installation
+- Fixed drag-and-drop upload area not covering full screen
+- Fixed home page stuck on loading animation after packaging
+- Fixed AI processing status indicator occasionally missing in record list
+- Fixed model call failure due to whitespace in model name
+- Fixed pypdfium2 segfault when importing PDFs on macOS
+
+### Optimizations
+
+- Scanned PDFs automatically skip opendataloader, use OCR directly
+- Significantly improved record list loading speed
+- Auto-cleanup of opendataloader-pdf temp files after processing
 
 [2026-04-22 - OCR Fix]
 

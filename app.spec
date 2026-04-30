@@ -172,13 +172,14 @@ _bundled_python_dir = _plugins_support / "python"
 _bundled_uv = _plugins_support / ("uv.exe" if sys.platform == "win32" else "uv")
 if _bundled_python_dir.exists():
     # Collect the entire bundled Python directory tree
+    # Use a.datas (not a.binaries) so files go to dist root, not _internal/
     for _item in _bundled_python_dir.rglob("*"):
         if _item.is_file():
             _rel = _item.relative_to(_bundled_python_dir)
-            a.binaries.append((str(_item), str(_plugins_support / "python" / _rel), "BINARY"))
+            a.datas.append((str(_Path("python") / _rel), str(_item), "DATA"))
     print(f"[DEBUG] Bundled Python: {_bundled_python_dir}")
 if _bundled_uv.exists():
-    a.binaries.append((str(_bundled_uv), str(_plugins_support / _bundled_uv.name), "BINARY"))
+    a.datas.append((str(_Path(_bundled_uv.name)), str(_bundled_uv), "DATA"))
     print(f"[DEBUG] Bundled uv: {_bundled_uv}")
 
 if sys.platform == "win32":

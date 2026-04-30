@@ -11,12 +11,18 @@ import base64
 import json
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from py.plugins.paths import get_plugin_venv_python
 
 logger = logging.getLogger(__name__)
+
+# Windows: prevent subprocess calls from flashing a console window.
+_SUBPROCESS_FLAGS = 0
+if sys.platform == "win32":
+    _SUBPROCESS_FLAGS = 0x08000000  # CREATE_NO_WINDOW
 
 
 class PluginError(Exception):
@@ -98,6 +104,7 @@ def run(
             # Use bytes for stderr to avoid encoding issues on Windows
             encoding="utf-8",
             errors="replace",
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except subprocess.TimeoutExpired:
         raise PluginError(
@@ -196,6 +203,7 @@ def run_with_progress(
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except Exception as exc:
         raise PluginError(

@@ -15,11 +15,17 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+# Windows: prevent subprocess calls from flashing a console window.
+_SUBPROCESS_FLAGS = 0
+if sys.platform == "win32":
+    _SUBPROCESS_FLAGS = 0x08000000  # CREATE_NO_WINDOW
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,7 @@ def _run_java_version(java_path: str) -> tuple[str, str, int]:
             timeout=10,
             encoding="utf-8",
             errors="replace",
+            creationflags=_SUBPROCESS_FLAGS,
         )
         # java -version outputs to stderr, not stdout
         return result.stdout, result.stderr, result.returncode
@@ -194,13 +201,11 @@ def detect_java(
 
 
 def _is_windows() -> bool:
-    import sys
     return sys.platform == "win32"
 
 
 def _get_known_java_paths() -> list[Path]:
     """Return list of candidate Java paths for the current platform."""
-    import sys
     candidates: list[Path] = []
 
     if sys.platform == "win32":

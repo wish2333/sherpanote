@@ -721,18 +721,8 @@ def _build_desktop(
 # ========== plugin runtime bundling ==========
 
 # python-build-standalone: install_only Python for creating plugin venvs
-# Matches the major.minor version used in pyproject.toml
+# Managed via `uv python install` instead of manual URL construction
 _PBS_VERSION = "3.11.11"
-_PBS_BUILD = "20241016"
-_PBS_PLATFORM = {
-    "win32": "x86_64-pc-windows-msvc-shared-install_only.tar.gz",
-    "darwin": "aarch64-apple-darwin-install_only.tar.gz",
-    "linux": "x86_64-unknown-linux-gnu-install_only.tar.gz",
-}
-_PBS_URL_TEMPLATE = (
-    "https://github.com/indygreg/python-build-standalone/releases/download/"
-    "{version}/cpython-{version}+{build}-{platform}"
-)
 
 # uv standalone binary
 _UV_VERSION = "0.6.6"
@@ -744,58 +734,42 @@ def _download_plugin_runtime() -> None:
     Places files in build/plugins_support/python/ and build/plugins_support/uv(.exe).
     These are collected by app.spec during PyInstaller build.
     """
-    import urllib.request
+    import subprocess
 
     support_dir = PROJECT_ROOT / "build" / "plugins_support"
     support_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Download python-build-standalone
-    platform_key = sys.platform
-    if platform_key not in _PBS_PLATFORM:
-        _error(f"Plugin runtime not supported on platform: {sys.platform}")
-
-    pbs_filename = f"cpython-{_PBS_VERSION}+{_PBS_BUILD}-{_PBS_PLATFORM[platform_key]}"
-    pbs_url = _PBS_URL_TEMPLATE.format(
-        version=_PBS_VERSION,
-        build=_PBS_BUILD,
-        platform=_PBS_PLATFORM[platform_key],
-    )
-    pbs_archive = support_dir / pbs_filename
+    # 1. Download python-build-standalone via uv
+    # uv python install handles URL resolution, platform detection, and caching
     pbs_target = support_dir / "python"
 
     if pbs_target.exists():
         _info("[plugins] Using existing bundled Python")
     else:
-        _info(f"[plugins] Downloading python-build-standalone {_PBS_VERSION}...")
-        _info(f"  URL: {pbs_url}")
-        _download_file(pbs_url, pbs_archive)
+        _info(f"[plugins] Installing Python {_PBS_VERSION} via uv...")
+        result = subprocess.run(
+            ["uv", "python", "install", _PBS_VERSION],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            _error(f"Failed to install Python {_PBS_VERSION}: {result.stderr.strip()}")
 
-        _info("[plugins] Extracting Python...")
-        import tarfile
-        with tarfile.open(pbs_archive, "r:gz") as tf:
-            # Extract to a temp dir first, then move the python/ subdir
-            tmp_extract = support_dir / "_tmp_extract"
-            if tmp_extract.exists():
-                shutil.rmtree(tmp_extract)
-            tmp_extract.mkdir()
-            tf.extractall(tmp_extract)
+        _info(f"[plugins] Locating Python {_PBS_VERSION}...")
+        result = subprocess.run(
+            ["uv", "python", "find", _PBS_VERSION],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            _error(f"Failed to find Python {_PBS_VERSION}: {result.stderr.strip()}")
 
-            # Find the python install directory inside the archive
-            extracted_python = None
-            for item in tmp_extract.iterdir():
-                if item.name.startswith("python"):
-                    extracted_python = item
-                    break
-            if extracted_python is None:
-                _error("Could not find python directory in python-build-standalone archive")
+        python_path = Path(result.stdout.strip())
+        # uv-managed Python directory structure:
+        # Windows: {install_root}/python.exe
+        # Linux/macOS: {install_root}/bin/python3
+        install_root = python_path.parent if sys.platform == "win32" else python_path.parent.parent
 
-            if pbs_target.exists():
-                shutil.rmtree(pbs_target)
-            shutil.move(str(extracted_python), str(pbs_target))
-            shutil.rmtree(tmp_extract)
-
-        # Clean up archive
-        pbs_archive.unlink(missing_ok=True)
+        _info(f"[plugins] Copying Python from {install_root} to {pbs_target}...")
+        shutil.copytree(str(install_root), str(pbs_target))
 
         # Verify
         py_exe = pbs_target / ("python.exe" if sys.platform == "win32" else "bin" / "python3")
