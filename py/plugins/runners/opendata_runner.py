@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def _run_opendataloader(file_path: str) -> dict:
+def _run_opendataloader(file_path: str, java_path: str | None = None) -> dict:
     """Call opendataloader-pdf to extract document content.
 
     Args:
@@ -29,12 +30,66 @@ def _run_opendataloader(file_path: str) -> dict:
     Returns:
         Dict matching ExtractedDocument fields.
     """
-    from opendataloader_pdf import convert
+    import os as _os
+    from pathlib import Path as _Path
+
+    from opendataloader_pdf import run_jar
 
     _emit_progress(0, f"Converting {file_path} with opendataloader-pdf")
 
-    # opendataloader-pdf returns markdown text
-    markdown = convert(file_path)
+    # Output to data/temp so user can inspect; use --format markdown
+    tmpdir = str(_Path("data") / "temp")
+    _os.makedirs(tmpdir, exist_ok=True)
+
+    # Clean up previous output with same stem name
+    stem = _Path(file_path).stem
+    for old in _Path(tmpdir).glob(f"{stem}.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+    args = [file_path, "--output-dir", tmpdir, "--format", "markdown", "--quiet"]
+    try:
+        run_jar(args, quiet=True)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Java not found. opendataloader-pdf requires Java 11+. "
+            "Install from https://adoptium.net/ or set java.exe path in settings."
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "UnsupportedClassVersionError" in msg:
+            raise RuntimeError(
+                "opendataloader-pdf requires Java 11 or newer. "
+                "Your Java version is too old. Please install Java 11+ from https://adoptium.net/"
+            ) from exc
+        raise RuntimeError(msg) from exc
+
+    # Read the generated markdown file
+    output_files: list[_Path] = []
+    md_files = sorted(_Path(tmpdir).glob(f"{stem}*.md"))
+    if md_files:
+        markdown = md_files[0].read_text(encoding="utf-8")
+        output_files.append(md_files[0])
+    else:
+        # Fallback: try JSON
+        json_files = sorted(_Path(tmpdir).glob(f"{stem}*.json"))
+        if json_files:
+            import json as _json
+            data = _json.loads(json_files[0].read_text(encoding="utf-8"))
+            kids = data.get("kids", [])
+            markdown = "\n".join(k.get("content", "") for k in kids if k.get("content"))
+            output_files.append(json_files[0])
+        else:
+            raise RuntimeError("opendataloader-pdf produced no output files")
+
+    # Clean up temp files after reading
+    for f in output_files:
+        try:
+            f.unlink()
+        except OSError:
+            pass
 
     _emit_progress(80, "Building output")
 
@@ -87,6 +142,7 @@ def main() -> None:
         return
 
     file_path = args.get("file_path", "")
+    java_path = args.get("java_path")
 
     if not file_path:
         _fail("Missing 'file_path' in input")
@@ -96,8 +152,15 @@ def main() -> None:
         _fail(f"File not found: {file_path}")
         return
 
+    # Set JAVA_HOME if a specific Java path was provided
+    if java_path:
+        import os as _os
+        java_bin = str(Path(java_path).parent)
+        _os.environ["JAVA_HOME"] = str(Path(java_bin).parent)
+        _os.environ["PATH"] = java_bin + _os.pathsep + _os.environ.get("PATH", "")
+
     try:
-        result = _run_opendataloader(file_path)
+        result = _run_opendataloader(file_path, java_path)
         json.dump({"success": True, "result": result}, sys.stdout)
         print()
     except Exception as exc:

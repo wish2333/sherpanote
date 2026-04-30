@@ -366,7 +366,7 @@ Base package: ~283MB. Optional backends downloaded on demand.
     2. 创建统一输出数据模型 ExtractedDocument
     3. 创建文本层检测器 text_detector.py
     4. 替换 ocr.py 中的 PyMuPDF
-      5-6. 创建 PP-OCR 和 markitdown 适配器
+        5-6. 创建 PP-OCR 和 markitdown 适配器
     5. 创建决策树入口 document_extractor.py
     6. 重构 main.py OCR 处理流程
     7. 前端支持 Office 文件类型
@@ -842,4 +842,701 @@ General
 frontend/src/views/SettingsView.vue
   #4292           🔵  Frontend lacks plugin configuration interface in SettingsView  
   #4293           🔵  SettingsView tab structure lacks plugins configuration section
+```
+
+### 📝 Commit Message
+
+```
+feat(plugins): 实现插件运行时架构与后端适配器
+
+- 新增插件子系统：路径解析、venv 生命周期、子进程 JSON 通信
+- 新增 docling 与 opendataloader-pdf 适配器，通过隔离 venv 调用
+- 实现多策略 Java 11+ 运行时检测
+- DocumentExtractor 支持可选后端路由与自动回退链
+- 暴露 5 个插件管理 API 及 dev.py plugin CLI
+- 构建脚本支持 --with-plugins 捆绑独立 Python 运行时
+```
+
+### 🚀 Release Notes
+
+```
+## 2026-04-30 - 插件化文档提取引擎
+
+### ✨ 新增
+- 引入插件系统，支持按需安装扩展文档提取后端
+- 新增 docling 后端：支持文本层提取与 OCR 模式
+- 新增 opendataloader-pdf 后端：基于 Java 的 PDF 解析
+- 后端决策树路由：根据配置自动选择引擎，不可用时自动回退
+- 新增插件管理 API：查询状态、安装/卸载后端、检测 Java 环境
+- 新增开发工具链：`dev.py plugin` 子命令集，支持本地调试与测试
+
+### ⚡ 优化
+- 插件运行在独立虚拟环境中，不污染项目主依赖
+- 构建时可捆绑独立 Python 运行时，支持无系统 Python 环境部署
+```
+
+# Phase3
+
+```
+ Phase 3: Settings UI, Plugin Management, Document Engine Selection
+
+ Context
+
+ SherpaNote v2.1.0 Phase 1 (core refactor + markitdown) and Phase 2 (plugin runtime + adapters) are complete. The
+ backend is fully ready -- all bridge methods are exposed, config persistence works for PluginConfig and
+ DocumentConfig. Phase 3 builds the entirely frontend user interface for plugin management and document engine
+ selection, per PRD sections 6.1-6.3.
+
+ Key Architecture Decisions
+
+ 1. Rename "OCR" tab to "OCR / Documents" -- add document/plugin sections within the existing tab rather than creating
+ an 8th tab (PRD 6.1 says "In the OCR / Document Extraction settings panel")
+ 2. Extract DocumentSettingsPanel.vue sub-component -- SettingsView is already 2574 lines; new sections add ~450 lines
+ that should be isolated
+ 3. Create usePlugin composable -- encapsulates install/uninstall event lifecycle (progress streaming, completion,
+ error) away from UI
+ 4. Add pluginConfig + documentConfig to Pinia store -- follows existing pattern for aiConfig/asrConfig/ocrConfig
+
+ Implementation Steps
+
+ Step 1: Bridge Helpers (~25 lines)
+
+ File: frontend/src/bridge.ts
+
+ Add 5 typed helper functions following existing patterns:
+ - getPluginStatus() -> calls get_plugin_status
+ - installPlugin(packageName) -> calls install_plugin
+ - uninstallPlugin(packageName) -> calls uninstall_plugin
+ - detectJava() -> calls detect_java
+ - getAvailableBackends() -> calls get_available_backends
+
+ Step 2: Store Extension (~15 lines)
+
+ File: frontend/src/stores/appStore.ts
+
+ - Import PluginConfig, DocumentConfig from types
+ - Add pluginConfig ref (default: { manual_java_path: null, docling_artifacts_path: null })
+ - Add documentConfig ref (default: { text_pdf_engine: "markitdown", scan_pdf_engine: "ppocr" })
+ - Export both in return object
+
+ Step 3: usePlugin Composable (~150 lines, NEW)
+
+ File: frontend/src/composables/usePlugin.ts
+
+ Reactive state:
+ - pluginStatuses, availableBackends, javaResult
+ - installingPackage, installProgress, uninstallingPackage, isDetectingJava
+
+ Functions:
+ - loadStatuses() -- calls getPluginStatus() + getAvailableBackends()
+ - installPackage(name) -- fire-and-forget call, backend emits events
+ - uninstallPackage(name) -- calls uninstallPlugin(), refreshes statuses
+ - runDetectJava() -- calls detectJava()
+ - cleanup() -- removes all event listeners
+
+ Event listeners (register on init, cleanup on unmount):
+ - plugin_install_progress -> updates installProgress
+ - plugin_install_complete -> clears installing, refreshes statuses, toast success
+ - plugin_install_error -> clears installing, toast error with offline guidance
+
+ Step 4: Config Integration (~35 lines)
+
+ File: frontend/src/views/SettingsView.vue
+
+ - Import PluginConfig/DocumentConfig types + store refs
+ - Add local refs: pluginConfig = ref(store.pluginConfig), documentConfig = ref(store.documentConfig)
+ - In loadConfig(): read res.data.plugin and res.data.document from backend
+ - In saveConfig(): include plugin and document in the update_config payload
+ - Import DocumentSettingsPanel component
+
+ Step 5: DocumentSettingsPanel Component (~450 lines, NEW)
+
+ File: frontend/src/components/settings/DocumentSettingsPanel.vue
+
+ Props: pluginConfig, documentConfig (passed from parent)
+ Emits: update:pluginConfig, update:documentConfig, save-requested
+
+ Card 1 -- PDF Processing Mode:
+ - Text-layer PDF engine dropdown: markitdown / opendataloader / docling / ppocr
+   - Unavailable engines greyed out with "(not installed)" label
+   - Each option shows environment requirement note
+ - Scan PDF engine dropdown: ppocr / docling (greyed if not installed)
+ - Warning alert when selected engine is unavailable
+
+ Card 2 -- Backend Management:
+ - Per-backend row (docling, opendataloader):
+   - Name + description + version badge (installed/not-installed/installing)
+   - Install button (shows confirm dialog with disk/network requirements)
+   - Uninstall button (two-step confirm pattern)
+   - Progress bar during installation
+ - Venv disk size display
+
+ Card 3 -- Environment Settings:
+ - Java path: text input + Browse button (pickFile) + Detect button
+   - Shows detection result badge or error guidance
+ - Docling model directory: text input + Browse button (pickDirectory) + Reset button
+
+ Step 6: SettingsView Integration (~15 lines)
+
+ File: frontend/src/views/SettingsView.vue
+
+ - Rename tab label: "OCR" -> "OCR / Documents"
+ - Place <DocumentSettingsPanel> after existing OCR model cards in the tab
+ - Pass pluginConfig/documentConfig as props, handle update events
+
+ Step 7: OcrView Enhancements (~40 lines)
+
+ File: frontend/src/views/OcrView.vue
+
+ - Import documentConfig from store, getAvailableBackends from bridge
+ - Show processing method hint below file list based on documentConfig
+ - Enhance error handling with actionable guidance ("Try switching engine in Settings")
+
+ Step 8: Manual Test Plan (~60 lines, NEW)
+
+ File: tests/test_plans/feature_plugin_settings.md
+
+ Test cases covering: tab display, backend status loading, install/uninstall flows, engine dropdown availability,
+ config persistence, Java detection, custom paths, OcrView hints.
+
+ Files Changed
+
+ ┌────────────────────────────────────────────────────────────┬─────────────┬────────────┬────────┐
+ │                            File                            │   Action    │ Est. Lines │  Risk  │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/bridge.ts                                     │ Add helpers │ +25        │ Low    │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/stores/appStore.ts                            │ Add refs    │ +15        │ Low    │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/composables/usePlugin.ts                      │ New         │ ~150       │ Medium │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/components/settings/DocumentSettingsPanel.vue │ New         │ ~450       │ High   │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/views/SettingsView.vue                        │ Modify      │ +50        │ Medium │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ frontend/src/views/OcrView.vue                             │ Modify      │ +40        │ Medium │
+ ├────────────────────────────────────────────────────────────┼─────────────┼────────────┼────────┤
+ │ tests/test_plans/feature_plugin_settings.md                │ New         │ ~60        │ Low    │
+ └────────────────────────────────────────────────────────────┴─────────────┴────────────┴────────┘
+
+ Verification
+
+ 1. cd frontend && bun run build -- zero errors
+ 2. uv run python main.py -- app launches, Settings > "OCR / Documents" tab shows 3 new card sections
+ 3. Backend management shows correct install status
+ 4. Install docling -> progress shown -> status updates to "Installed"
+ 5. Engine dropdowns reflect availability correctly
+ 6. Config persists across app restart
+ 7. Java detection works, custom paths save
+ 8. Existing OCR model config/delete/download unaffected
+```
+
+
+
+## 问题
+
+- 新增界面应该显示中文
+
+- 新增界面中的环境设置应该设置自动检测并显示状态
+
+- PDF引擎切换不生效
+
+- 插件的包安装未正确执行，控制台也没有打印，无法得知出问题在哪里，而且模型安装没有实现可操作和可检测吧。但是用dev.py的参数安装是可以的。卸载也会出错。
+
+- Q:\Git\GiteaManager\sherpanote>uv run dev.py plugin uninstall opendataloader
+  Uninstalling opendataloader (pip: opendataloader-pdf)...
+  [ERROR] Uninstall failed: error: unexpected argument '-y' found
+
+    tip: to pass '-y' as a value, use '-- -y'
+
+  Usage: uv.exe pip uninstall [OPTIONS] <PACKAGE|--requirements <REQUIREMENTS>>
+
+  For more information, try '--help'.
+
+- 前端设置中没有Destroy venv的实现
+
+- 而且Docling应该也是可以搭配RapidOCR执行的（不过现在这两个没安装在同一个环境会不会没法搭配），这个不知道能不能实现
+
+- 插件虚拟环境中uv的作用在哪里，好像也没见你用uv来管理插件虚拟环境啊，如果没用的话就删掉吧
+
+```
+  Bug 修复总结
+
+  1. PDF 引擎切换不生效 (Critical)
+
+  根因: main.py:1592 update_config() 缓存了 _document_extractor 但切换引擎时没有将其置为 None 失效
+  修复: 在 update_config() 中增加 self._document_extractor = None 和 self._plugin_manager = None
+
+  2. uv pip uninstall -y 参数错误 (Critical)
+
+  根因: py/plugins/manager.py:246 对 uv pip uninstall 传了 -y 标志，该命令不支持此参数
+  修复: 移除 "-y" 参数
+
+  3. 安装/卸载无日志输出
+
+  修复: main.py install_plugin() 和 uninstall_plugin() 增加 logger.info/error 调用，可通过控制台查看执行状态
+
+  4. 前端界面中文化
+
+  DocumentSettingsPanel.vue 所有文字改为中文（引擎选择、后端管理、环境设置、安装对话框、按钮等）
+
+  5. 环境设置自动检测
+
+  onMounted 中自动调用 runDetectJava()，Java 检测结果显示"已检测到 Java xx"或"未检测到 Java 11+"
+
+  6. 新增销毁虚拟环境功能
+
+  - 后端 main.py: 新增 destroy_plugin_venv API
+  - 前端 bridge.ts: 新增 destroyPluginVenv()
+  - 前端 usePlugin.ts: 新增 doDestroyVenv()
+  - 前端 DocumentSettingsPanel.vue: 环境设置卡片新增"销毁插件虚拟环境"按钮（含确认步骤）
+
+  7. Docling + RapidOCR
+
+  docling_runner.py:47 已配置 pipeline_options.ocr_engine = "rapidocr_onnx"。Docling 在插件 venv 中有自己的 RapidOCR
+  依赖，无需与主应用共享模型。通过 docling_artifacts_path 可指定预下载模型路径以支持离线使用。
+
+  8. UV 的作用
+
+  UV 已被使用：用于创建 venv(manager.py:85-130)、安装包(uv pip install)、卸载包(uv pip uninstall)、版本查询(uv pip
+  show)。不能删除。
+```
+
+- 插件引擎运行报错
+- 插件安装时要限定成现在的版本以避免后期出错
+- JAVA这个控制台打印的信息乱七八糟的，根本不知道究竟现在软件会用哪个路径的java执行，而且我在设置里面java路径好像也并没有用。
+- 此外，插件引擎错误了前端没有显示报错就切换成markitdown跳到记录了，用户无法得知没有用原本的引擎。还有，这些设置改动了之后应该自动保存配置，不需要用户手动保存。
+- 前端设置中的后端管理的安装虽然打印Plugin install requested: opendataloader-pdf但是网速完全没跑起来，跟后端dev实现的效果完全不同。
+- Docling能够正确运行了，但是环境设置中其模型目录默认是什么不知道，也没有提示用户应该填哪个选项，而且现在我们只一套安装方式应该不会出问题（改了前端安装失败之后），应该也不太需要手动指定Docling目录吧，不过保留这个以托底也可以，但是至少应该显示默认文件夹在哪里
+- 同理，`java路径`应该改为`java.exe路径`
+- Docling 模型默认目录改为 data/docling + 添加模型预下载功能
+- 现在插件引擎检测有问题了，明明已经安装但是无法选择（PDF处理模式处仍然显示未安装，其他地方都检测正确）
+- PDF处理模式的选项添加到OCR页中，并同步两边的设置
+- 04:20:14 [INFO] py.document_extractor: Text layer PDF: Q:\VerySync\CUHK-Learning\SOCI5601 Theory\Final\SOCI 5601 Take-Home Exam.pdf -> opendataloader-pdf
+  04:20:14 [DEBUG] py.plugins.java_detect: Java detection: Checking manual path: C:\Program Files\Java\jdk-17.0.1\bin\java.exe
+  04:20:14 [INFO] py.adapters.opendata_adapter: opendataloader-pdf extraction (Java: C:\Program Files\Java\jdk-17.0.1\bin\java.exe): Q:\VerySync\CUHK-Learning\SOCI5601 Theory\Final\SOCI 5601 Take-Home Exam.pdf
+  04:20:14 [DEBUG] py.plugins.runner: Running plugin subprocess: Q:\Git\GiteaManager\sherpanote\.plugin_dev\.venv\Scripts\python.exe -m py.plugins.runners.opendata_runner --json-input eyJmaWxlX3BhdGgiOiAiUTpcXFZlcnlTeW5jXFxDVUhLLUxlYXJuaW5nXFxTT0NJNTYwMSBUaGVvcnlcXEZpbmFsXFxTT0NJIDU2MDEgVGFrZS1Ib21lIEV4YW0ucGRmIiwgImphdmFfcGF0aCI6ICJDOlxcUHJvZ3JhbSBGaWxlc1xcSmF2YVxcamRrLTE3LjAuMVxcYmluXFxqYXZhLmV4ZSJ9
+  04:20:15 [WARNING] py.document_extractor: opendataloader-pdf extraction failed: Plugin output is not valid JSON: Extra data: line 1 column 2 (char 1)
+  04:20:15 [WARNING] py.document_extractor: opendataloader unavailable/failed for Q:\VerySync\CUHK-Learning\SOCI5601 Theory\Final\SOCI 5601 Take-Home Exam.pdf, falling back
+  04:20:15 [INFO] py.document_extractor: Text layer found: Q:\VerySync\CUHK-Learning\SOCI5601 Theory\Final\SOCI 5601 Take-Home Exam.pdf -> markitdown
+  04:20:16 [INFO] py.adapters.markitdown_adapter: Converting with markitdown: Q:\VerySync\CUHK-Learning\SOCI5601 Theory\Final\SOCI 5601 Take-Home Exam.pdf
+
+```
+  后端修复 (4项)
+
+  ┌─────┬───────────────────┬───────────────────────────────────────────┬───────────────────────────────────────────┐
+  │  #  │       问题        │                   根因                    │                   修复                    │
+  ├─────┼───────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+  │ 1   │ PDF引擎切换不生效 │ update_config() 未失效缓存的              │ 添加 self._document_extractor = None 和   │
+  │     │                   │ _document_extractor                       │ self._plugin_manager = None               │
+  ├─────┼───────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+  │ 2   │ 卸载报错 -y       │ uv pip uninstall 不支持 -y 参数           │ 移除 -y 标志                              │
+  ├─────┼───────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+  │ 3   │ 安装/卸载无日志   │ 缺少 logger 调用                          │ install_plugin()/uninstall_plugin() 添加  │
+  │     │                   │                                           │ logger.info/error                         │
+  ├─────┼───────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+  │ 4   │ Docling import    │ PdfPipelineOptions 在 v2 中路径变为       │ 修正 import 路径，移除不存在的 ocr_engine │
+  │     │ 错误              │ docling.datamodel.pipeline_options        │  属性                                     │
+  └─────┴───────────────────┴───────────────────────────────────────────┴───────────────────────────────────────────┘
+
+  Runner 修复 (2项)
+
+  ┌─────┬─────────────────────┬─────────────────────────────────────────────────────────────────────────────────────┐
+  │  #  │        问题         │                                        修复                                         │
+  ├─────┼─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+  │ 5   │ Opendata runner     │ 重写 _run_opendataloader() 捕获 Java stderr，检测 UnsupportedClassVersionError      │
+  │     │ 错误不透明          │ 等常见错误并给出中文友好提示                                                        │
+  ├─────┼─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────┤
+  │ 6   │ Docling runner API  │ 修正为 v2 API（pipeline_options.ocr_options.lang，doc.num_pages）                   │
+  │     │ 不兼容 v2           │                                                                                     │
+  └─────┴─────────────────────┴─────────────────────────────────────────────────────────────────────────────────────┘
+
+  前端修复 (6项)
+
+  ┌─────┬─────────────────────────┬───────────────────────────────────────────────────────────┐
+  │  #  │          问题           │                           修复                            │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 7   │ 界面英文                │ DocumentSettingsPanel 全面中文化                          │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 8   │ 环境未自动检测          │ onMounted 自动调用 runDetectJava()                        │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 9   │ 缺少销毁 venv           │ 新增后端 destroy_plugin_venv API + 前端按钮（含确认步骤） │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 10  │ 插件状态不显示          │ 模板已使用解构变量替换 .value                             │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 11  │ bridge 缺少 destroy     │ 添加 destroyPluginVenv()                                  │
+  ├─────┼─────────────────────────┼───────────────────────────────────────────────────────────┤
+  │ 12  │ composable 缺少 destroy │ 添加 doDestroyVenv()                                      │
+  └─────┴─────────────────────────┴───────────────────────────────────────────────────────────┘
+
+● 修复总结
+
+  1. Java 路径传递链路打通
+
+  之前 manual_java_path 只用于检测显示，实际执行 opendataloader 时从未使用。
+
+  修复了完整链路：
+
+  PluginConfig.manual_java_path
+    → main.py _get_document_extractor() 传 plugin_config
+      → DocumentExtractor._get_opendata_adapter() 传 java_path
+        → OpendataAdapter(manual_java_path=)
+          → detect_java(manual_path=) 优先使用手动路径
+          → runner 接收 java_path，设置 JAVA_HOME 环境变量
+            → opendataloader-pdf 使用正确的 Java 执行
+
+  关键改动：
+  - opendata_adapter.py: 构造函数接受 manual_java_path，extract_text_pdf() 传递 java_path 到 runner
+  - opendata_runner.py: 接受 java_path 参数，设置 JAVA_HOME + PATH
+  - document_extractor.py: 新增 plugin_config 参数，传递给 Adapter
+  - main.py: 传递 self._config.plugin 到 DocumentExtractor
+
+  2. 引擎回退前端提示
+
+  当用户选择了 docling/opendataloader 但实际使用了其他引擎时，前端弹出警告：
+
+  ▎ "注意：所选引擎 Docling 不可用，已使用 markitdown"
+
+  实现：
+  - main.py ocr_complete 事件携带 backend_used 字段
+  - OcrView.vue 比较所使用的引擎与配置的引擎，不匹配时显示 warning toast
+
+  3. 设置自动保存
+
+  Document/Plugin 配置修改后 500ms 自动保存，无需手动点击 Save。实现：SettingsView.vue 对 pluginConfig/documentConfig
+  添加 watch(deep: true) 带 setTimeout 防抖。
+  
+  ● 总结
+
+  1. 默认模型目录改为 data\docling
+
+  链路: PluginConfig.docling_artifacts_path -> DocumentExtractor -> DoclingAdapter -> runner ->
+  PdfPipelineOptions.artifacts_path
+
+  当用户未手动指定时，自动使用 软件目录\data\docling 作为模型存储位置。UI 提示也已更新：
+
+  ▎ 留空则使用默认位置 (软件目录\data\docling)
+
+  2. 模型下载时机 + 手动预下载
+
+  时机: Docling 模型在 首次运行时 下载（调用 converter.convert() 时从 HuggingFace 拉取），不是在 pip install 时。
+
+  新增"下载模型"按钮: Docling 已安装后，在后端管理卡片中出现"下载模型"按钮。点击后：
+  1. 创建一个最小 PDF
+  2. 触发 docling 转换，从而自动下载约 1.5GB 模型文件到 data/docling
+  3. 显示下载进度
+  4. 完成后自动清理临时 PDF
+
+  3. 前端安装 bug 修复
+
+  根因: install_plugin 用了 self.dispatch_task("install_plugin", {}) 但 dispatch_task 是主线程命令分发器，_work()
+  函数从未被传入也不执行。
+
+  修复: 改为 threading.Thread(target=_work, daemon=True).start() + Popen 逐行流式读取输出推送进度。
+  
+    根因: 安装/卸载完成后 _plugin_manager 和 _document_extractor 缓存未失效。前端 loadStatuses() 调用
+  getAvailableBackends() 时返回的是旧缓存结果（docling: False），导致引擎选择项灰显。
+
+  修复: 在 install_plugin 的 _work() 完成路径和异常路径，以及 uninstall_plugin 中，都添加：
+  self._plugin_manager = None
+  self._document_extractor = None
+
+  （destroy_plugin_venv 和 update_config 已有此逻辑）
+  
+  ● 修复: PDF处理模式的引擎可用性判断现在同时检查两个数据源：
+
+  - availableBackends (来自 getAvailableBackends API)
+  - pluginStatuses (来自 getPluginStatus API — 与后端管理处使用相同来源)
+
+  const isDoclingAvailable = computed(
+    () => availableBackends.value.docling === true
+       || pluginStatuses.value.docling?.installed === true,
+  );
+
+  这样即使某一数据源异常，只要后端管理卡片显示已安装，引擎下拉选项就会同步显示可用。
+  ● 两个问题同一个根因：
+
+  py/document_extractor.py 缺少 from pathlib import Path，导致 _get_docling_adapter() 中 Path("data") / "docling" 抛出
+  NameError → get_available_backends() 异常被 try/except 吞掉返回 {success: false} → 前端 availableBackends 始终为空 {}
+  → 引擎下拉永远显示"未安装"。
+
+  加上 import 后，getAvailableBackends() 恢复正常，下拉选项也会同步更新。之前添加的双数据源检查（pluginStatuses
+  兜底）作为保险仍然保留。
+  
+  - _setup_hf_home()：把相对路径 data/docling 转为绝对路径，mkdir -p 确保存在，设置 os.environ["HF_HOME"]
+  - _run_docling()：调用前先 _setup_hf_home(artifacts_path)，PdfPipelineOptions.artifacts_path 不设置，让 docling 走 HF
+  hub 自然查找/下载
+  - _pre_download_models()：同样设 HF_HOME，跑一次空 PDF 转换触发下载，模型落在 data/docling/hub/ 下
+  - 默认路径：data/docling，用户可在设置中覆盖
+  
+    1. 空白内容：默认 --format json 生成的 JSON 键是 kids[].content，没有 markdown。改为 --format markdown 直接生成 .md
+  文件，读取即得文本内容。JSON 格式作为 fallback（从 kids 提取 content 拼接）。
+  2. 临时目录：改为 data/temp，不自动清理，旧文件处理前先删除以防混淆。
+```
+
+
+
+# 其他问题
+
+- opendata_runner生成的temp文件没有清理
+- 没有持久化新功能对应的设置
+- 全屏拖拽输入替换区域拖拽输入以节省排版空间 @reference\filedrop
+- 导出备份默认不勾选应用配置，检查导出备份是否完全涵盖新功能对应的设置
+- opendata_runner不知道支不支持扫描件，效果怎么样，可以测试一下
+
+  1. opendata_runner 临时文件清理 -- _run_opendataloader 读取完生成文件后立即删除它们
+  2. 导出备份默认不勾选应用配置 -- include_config 默认值改为 false。备份本身已涵盖 plugin/document 配置（通过
+    config.json 导出完整 AppConfig），无需额外修改
+  3. OcrView 全屏拖拽 -- 移除了专用的上传区域卡片，替换为全屏拖拽覆盖层 + 紧凑工具栏（标题输入 +
+    选择文件按钮）。拖拽支持多文件
+  4. opendata_runner 扫描件测试 -- 不支持。扫描 PDF 只能输出页码和图片引用，没有实际文本。扫描件路由应继续走 ppocr
+
+- 设置页中持久化了但是OCR页中PDF引擎选择没有持久化，每次打开都是显示默认的设置，打开设置页之后才更新
+- 设置页中环境设置有戳出容器的小字（检测到的Java路径、docling说明）
+- OCR页上传了文件之后的文件列表给每个PDF文件添加一个检测PDF是否有文字层的功能
+
+● 完成。PDF 文件添加到列表后会自动检测文字层：
+
+  - 检测中: 显示小 spinner badge
+  - 有文字层: 绿色 text badge
+  - 无文字层（扫描件）: 红色 scan badge
+  - 非 PDF 文件不检测
+
+## 补充功能
+
+测试docling默认没有ocr扫描件的功能，我看他不是能搭配rapidocr吗，能够实现吗
+
+可以。Docling 自带 RapidOcrOptions，不需要额外装 rapidocr-onnxruntime（docling 的依赖里已包含）。
+
+  改动总结：docling_runner.py 的 OCR 模式从 EasyOCR（默认）切换为 RapidOcrOptions(lang=["english",
+  "chinese"])，支持中英文扫描件识别。RapidOCR 相比 EasyOCR 更轻量，且 SherpaNote 本身已使用 RapidOCR 生态。
+
+## CC-Mem
+
+```
+Apr 30, 2026
+
+..\..\Git\GiteaManager\sherpanote\py\plugins\paths.py
+  #4294  1:19 AM  🔵  Phase 3 Development Initiated  
+  #4295           🔵  SherpaNote Architecture Explored for Phase 3  
+..\..\Git\GiteaManager\sherpanote\py\plugins\__init__.py
+  #4297           🔵  Plugin Runner Implementations and Frontend Composables Identified  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4298           🔵  SettingsView Configuration Architecture Documented  
+..\..\Git\GiteaManager\sherpanote\py\plugins\manager.py
+  #4299           🔵  SherpaNote Core Architecture Analyzed  
+..\..\Git\GiteaManager\sherpanote\py\plugins\runners\docling_runner.py
+  #4300  1:20 AM  🔵  Frontend Composables and Plugin Runners Implementation Patterns Documented  
+..\..\Git\GiteaManager\sherpanote\main.py
+  #4301           🔵  API Architecture and Plugin Integration Points Mapped  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4302           🔵  SettingsView Model and Dependency Management Implementation Detailed  
+..\..\Git\GiteaManager\sherpanote\main.py
+  #4303  1:21 AM  🔵  Plugin Manager and Document Extractor Integration Architecture  
+  #4304           🔵  Plugin and OCR Management API Surface Documented  
+..\..\Git\GiteaManager\sherpanote\py\plugins\java_detect.py
+  #4305           🔵  Supporting Plugin Files and Settings Tab Structure Confirmed  
+..\..\Git\GiteaManager\sherpanote\py\document_extractor.py
+  #4306           🔵  Document Extraction Decision Tree and Java Detection Architecture  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4307  1:22 AM  🔵  Phase 3 Planning Reveals Complete Backend Plugin System with Frontend Integration Gaps  
+  #4308           🔵  Config Save Patterns and OCR Tab Implementation Confirmed  
+..\..\Git\GiteaManager\sherpanote\frontend\src\stores\appStore.ts
+  #4309           🔵  App Store State Architecture Confirmed Missing Plugin and Document Config Sections  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4310           🔵  SettingsView Imports and State Initialization Confirm Missing Plugin Configuration  
+  #4311  1:23 AM  🔵  saveConfig Function Excludes Plugin and Document Config Sections  
+docs/PRD-2.1.0.md
+  #4312  1:37 AM  ⚖️  SherpaNote Phase 3 implementation plan approved  
+General
+  #4313           ⚖️  Phase 3 implementation broken into 9 discrete tasks  
+  #4314           ⚖️  Phase 3 task dependencies established with two-track parallel execution  
+frontend/src/bridge.ts
+  #4315  1:38 AM  🟣  Plugin backend bridge helpers added to bridge.ts  
+frontend/src/stores/appStore.ts
+  #4316           🟣  Plugin and Document config refs added to Pinia store  
+  #4317           🟣  Store export updated with pluginConfig and documentConfig  
+frontend/src/composables/usePlugin.ts
+  #4318           🟣  usePlugin composable created for plugin lifecycle management  
+  #4319           🔄  usePlugin composable refactored with automatic cleanup and simplified error handling  
+frontend/src/components/settings/DocumentSettingsPanel.vue
+  #4320  1:39 AM  🟣  DocumentSettingsPanel component created with PDF engine selection, plugin management, and environment configuration  
+frontend/src/views/SettingsView.vue
+  #4321  1:42 AM  🟣  PluginConfig and DocumentConfig types added to SettingsView imports  
+  #4322           🟣  pluginConfig and documentConfig refs added to SettingsView  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4323  1:43 AM  🟣  Added Document Settings Panel component to SettingsView  
+General
+  #4324           🟣  Phase 3 development tasks progressing for document processing features  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4325           🔵  OcrView.vue component implements comprehensive OCR processing interface  
+  #4326           🟣  Added intelligent engine detection and user guidance to OcrView  
+  #4327           🟣  Engine detection now displays visual hint in OCR file list UI  
+..\..\Git\GiteaManager\sherpanote\frontend\src\components\settings\DocumentSettingsPanel.vue
+  #4328           🔵  DocumentSettingsPanel.vue template structure reveals plugin management UI  
+  #4330  1:44 AM  🔄  Added template helper functions to DocumentSettingsPanel component  
+  #4332           🔄  DocumentSettingsPanel refactored to destructure usePlugin composable  
+  #4333           🔄  DocumentSettingsPanel watch statements updated to use destructured plugin state  
+General
+  #4334  11:38 AM  ✅  Task list identified for session work  
+..\..\Git\GiteaManager\sherpanote\py\plugins\runners\opendata_runner.py
+  #4335  11:42 AM  🔵  OpenData Runner Temp File Management  
+..\..\Git\GiteaManager\sherpanote\main.py
+  #4336            🔵  Export Backup Configuration  
+..\..\Git\GiteaManager\sherpanote\py\adapters\opendata_adapter.py
+  #4337  11:43 AM  🔵  OpenDataLoader Document Processing  
+..\..\Git\GiteaManager\sherpanote\main.py
+  #4338            🔵  Configuration Persistence Mechanism  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4339            🔵  Backup Configuration Default  
+  #4340            🔵  Backup Configuration Coverage  
+..\..\Git\GiteaManager\sherpanote\main.py
+  #4341            🔵  Backup System Architecture  
+..\..\Git\GiteaManager\sherpanote\py\backup.py
+  #4342            🔵  Backup System Configuration Handling  
+..\..\Git\GiteaManager\sherpanote\py\config.py
+  #4343            🔵  Configuration Data Model Structure  
+  #4344            🔵  Configuration Serialization Support  
+..\..\Git\GiteaManager\sherpanote\py\plugins\runners\opendata_runner.py
+  #4345  11:44 AM  🔴  OpenData Runner Temp File Cleanup  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4346            🟣  Fullscreen Drag and Drop Implementation  
+..\..\Git\GiteaManager\sherpanote\py\plugins\runners\opendata_runner.py
+  #4347            ✅  Temp File Cleanup Task Status Updated  
+  #4348  11:48 AM  🔴  OpenData Runner Temp File Cleanup Implemented  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4349            🔴  Backup Default Configuration Changed  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4350  11:49 AM  🔄  OcrView Drag-Drop System Refactored  
+  #4351            🟣  Fullscreen Multi-File Drag-Drop Implemented  
+  #4352  11:50 AM  🟣  OcrView UI Streamlined with Fullscreen Drag-Drop  
+  #4353            ✅  Task Progress: Fullscreen Drag-Drop Completed  
+..\..\Git\GiteaManager\sherpanote\py\plugins\runners\opendata_runner.py
+  #4354            🔵  OpenData Runner Text-Only Processing Confirmed  
+  #4355  11:51 AM  🔵  OpenDataLoader PDF Not Installed  
+..\..\Git\GiteaManager\sherpanote\test\Lectures Extract[1-2].pdf
+  #4356  11:58 AM  🔵  Test PDF is scanned document requiring OCR  
+..\..\Git\GiteaManager\sherpanote\.plugin_dev\.venv\Lib\site-packages\opendataloader_pdf\runner.py
+  #4357  12:02 PM  🔵  opendataloader-pdf uses embedded JAR with dual output modes  
+..\..\Git\GiteaManager\sherpanote\test\Lectures Extract[1-2].pdf
+  #4358  12:03 PM  🔵  opendataloader-pdf extracts images from scanned PDFs without OCR  
+General
+  #4359  12:07 PM  🔵  Drag-and-drop file handling uses Tauri backend command  
+  #4360            🔵  OCR completion handling routes to editor view  
+  #4361  12:08 PM  🔵  Drag overlay uses pointer-events-none causing drop target issue  
+  #4362            🔴  Added window-level drag event handlers to prevent default file opening  
+  #4363            🔴  Added cleanup for window drag event listeners in onUnmounted  
+  #4364  12:09 PM  🔵  Located onMounted lifecycle hook for event listener registration  
+  #4365            🔵  Identified onMounted hook structure for window event registration  
+  #4366  12:10 PM  🔴  PDF engine selection persistence issue identified  
+  #4367            🔴  Settings page UI text overflow issue identified  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4368            🔵  OcrView engine selection uses reactive computed properties from store  
+  #4369  12:11 PM  🔵  OcrView onMounted hook only loads backends, not configuration  
+..\..\Git\GiteaManager\sherpanote\frontend\src\bridge.ts
+  #4370            🔵  Configuration loading not found in bridge.ts  
+  #4371  12:12 PM  🔵  Bridge API lacks get_config function for loading persisted settings  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\SettingsView.vue
+  #4372            🔵  SettingsView loads and populates store with document configuration  
+  #4373            🔵  SettingsView loadConfig function uses call("get_config") API  
+  #4374            🔵  loadConfig called at three locations in SettingsView  
+  #4375            🔵  SettingsView onMounted calls loadConfig to initialize store  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4376            🔴  Fixed OCR page PDF engine selection not persisting on load  
+..\..\Git\GiteaManager\sherpanote\frontend\src\components\settings\DocumentSettingsPanel.vue
+  #4377            🔵  Settings page text overflow sources identified in DocumentSettingsPanel  
+  #4378  12:13 PM  🔴  Fixed Java path text overflow in settings environment section  
+frontend/src/views/OcrView.vue
+  #4379  12:17 PM  🟣  Adding PDF text layer detection to OCR file list  
+  #4380            🔵  OcrView file list and PDF engine selector structure  
+  #4381            🔵  File entry rendering structure in OcrView  
+frontend/src/bridge.ts
+  #4382            🔵  Backend has_text_layer function already exists  
+py/text_detector.py
+  #4383  12:18 PM  🔵  has_text_layer function implementation details  
+main.py
+  #4384            🔵  OCR engine and document extractor initialization in main.py  
+  #4385            🔵  ocr_process method already uses PDF text layer detection  
+  #4386  12:19 PM  🔵  Planned API insertion point identified in main.py  
+  #4387            🟣  Added detect_pdf_text_layer API method to main.py  
+frontend/src/bridge.ts
+  #4388  12:20 PM  🟣  Added detectPdfTextLayer bridge function to frontend  
+frontend/src/views/OcrView.vue
+  #4389            🟣  Added detectPdfTextLayer import to OcrView.vue  
+  #4390            🟣  Added PDF text layer detection state and function to OcrView  
+  #4391  12:22 PM  🟣  Triggered PDF text layer detection on file upload  
+  #4392            🟣  Added PDF text layer status indicator to file list UI  
+..\..\Git\GiteaManager\sherpanote\frontend\src\views\OcrView.vue
+  #4393  12:24 PM  🔵  Fullscreen drag drop zone investigation  
+  #4394  12:25 PM  🔵  Drop handler implementation uses backend IPC call  
+  #4395  12:26 PM  🔵  Window-level drop listener registered in onMounted  
+  #4396            🔵  Window event listeners cleaned up in onUnmounted  
+  #4397            🔵  Root cause identified: Container width limitation  
+  #4398            🔴  Window-level drop handler now processes files  
+  #4399  12:27 PM  🔴  Removed duplicate element-level onDrop handler  
+  #4400            🔴  Registered window-level dragenter and dragleave listeners  
+  #4401            🔴  Added cleanup for window dragenter and dragleave listeners  
+General
+  #4402  12:29 PM  🔵  Docling already has built-in OCR support  
+  #4403            🔵  Context7 identifies multiple Docling documentation sources  
+  #4404            🔵  Docling supports multiple OCR backends including RapidOCR  
+  #4405            🟣  Implemented RapidOCR backend for docling OCR processing  
+  #4407  12:32 PM  🔵  EasyOCR not installed in project virtual environment  
+  #4408  12:33 PM  🔵  Docling model cache occupies 506MB of storage  
+  #4409            🔵  Docling does not depend on EasyOCR or RapidOCR  
+  #4410            🔵  EasyOCR never installed in project dependency tree  
+  #4411            🔵  Docling-slim depends on standard Python packages, no OCR engines  
+  #4412  12:35 PM  🔵  Docling OCR model dependency investigation  
+  #4413            🔵  Docling OCR models downloaded on first use, not bundled  
+  #4415            🔵  RapidOcrOptions exposes configurable model paths  
+  #4416            🔵  RapidOcrOptions model paths default to None  
+  #4417  12:36 PM  🔵  rapidocr package installed but rapidocr_onnxruntime missing  
+  #4418  12:37 PM  🔵  rapidocr package includes bundled ONNX models
+```
+
+## 📝 Commit Message
+
+```
+feat(ui): 插件管理设置界面与引擎选择
+
+- 新增 DocumentSettingsPanel 组件：引擎切换、后端管理、环境配置
+- 新增 usePlugin composable 封装安装/卸载事件生命周期
+- bridge 与 Pinia store 扩展插件/文档配置支持
+- OCR 页改为全屏拖拽布局，文件列表自动检测 PDF 文字层
+- 修复引擎切换不生效（缓存未失效）、安装无日志、卸载 -y 报错
+- 修复 Java 路径未传递至执行链路、引擎回退无前端提示
+- 修复 Docling v2 API 兼容性、opendata runner 输出格式
+- 设置变更自动保存、界面全面中文化、临时文件清理
+- Docling默认使用RapidOCR进行OCR识别
+```
+
+## 🚀 Release Notes
+
+```
+## 2026-04-30 - 插件管理与文档引擎设置界面
+
+### ✨ 新增
+- 设置页新增"OCR / 文档"面板，包含三大功能区块：
+  - PDF 处理模式：可选择文本层引擎与扫描件引擎，不可用引擎自动置灰
+  - 后端管理：可视化安装/卸载 docling 与 opendataloader-pdf，含进度展示
+  - 环境设置：自动检测 Java 环境，可自定义 Java 路径与 Docling 模型目录
+- Docling 支持手动预下载模型，默认存储于软件目录下的 data/docling
+- 新增销毁插件虚拟环境功能（含二次确认）
+- OCR 页升级为全屏拖拽布局，上传文件后自动检测是否为扫描件
+- 引擎回退时弹出警告提示，告知用户实际使用的引擎
+
+### 🐛 修复
+- 修复切换 PDF 引擎后不生效的问题
+- 修复插件安装/卸载时无日志输出、安装进度无响应的问题
+- 修复自定义 Java 路径未实际生效的问题
+- 修复 opendataloader-pdf 处理后输出空白内容的问题
+- 修复设置页环境配置文字溢出容器的问题
+- 修复 OCR 页引擎选择未在启动时同步已保存配置的问题
+- 修复插件安装完成后引擎选项仍显示未安装的问题
+- 修复导出备份默认勾选应用配置的问题
+
+### ⚡ 优化
+- 插件与文档配置修改后自动保存，无需手动点击保存
+- opendataloader-pdf 临时文件处理完毕后自动清理
+- 扫描件 PDF 自动跳过 opendataloader，直接使用 OCR 引擎
 ```

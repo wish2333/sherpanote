@@ -1600,6 +1600,8 @@ class SherpaNoteAPI(Bridge):
         self._asr = None
         # Re-create OCR engine if config changed.
         self._ocr_engine = None
+        self._document_extractor = None
+        self._plugin_manager = None
         return {"success": True, "data": self._config.to_dict()}
 
     # ---- Backup / Restore ----
@@ -1674,6 +1676,7 @@ class SherpaNoteAPI(Bridge):
                 ocr_engine=self._get_ocr(),
                 plugin_manager=pm,
                 doc_config=doc_config,
+                plugin_config=self._config.plugin if self._config else None,
             )
         return self._document_extractor
 
@@ -1697,6 +1700,23 @@ class SherpaNoteAPI(Bridge):
             }
             for i, block in enumerate(blocks)
         ]
+
+    @expose
+    def detect_pdf_text_layer(self, file_path: str) -> dict:
+        """Detect whether a PDF has a text layer."""
+        from py.text_detector import has_text_layer
+        from pathlib import Path
+
+        if not Path(file_path).exists():
+            return {"success": False, "error": f"File not found: {file_path}"}
+        if not file_path.lower().endswith(".pdf"):
+            return {"success": False, "error": "Not a PDF file"}
+
+        try:
+            has_text = has_text_layer(file_path)
+            return {"success": True, "data": {"has_text": has_text}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @expose
     def ocr_process(self, files: list[str], mode: str = "single", title: str | None = None) -> dict:
@@ -1751,10 +1771,11 @@ class SherpaNoteAPI(Bridge):
                         })
 
                         doc = extractor.extract(f, on_progress=on_file_progress)
-                        text = doc.markdown
+                        text = doc.markdown or ""
                         segments = self._build_segments(text)
                         source_name = Path(f).stem
                         record_title = title or f"OCR-{source_name}"
+                        backend_used = doc.backend
 
                         record = self._storage.save({
                             "title": record_title,
@@ -1763,6 +1784,7 @@ class SherpaNoteAPI(Bridge):
                             "segments": segments,
                         })
                         record = self._annotate_record(record)
+                        record["_backend_used"] = backend_used
                         created_records.append(record)
 
                     self._emit("ocr_progress", {
@@ -1771,7 +1793,11 @@ class SherpaNoteAPI(Bridge):
                         "total": total,
                         "percent": 100,
                     })
-                    self._emit("ocr_complete", {"status": "done", "records": created_records})
+                    self._emit("ocr_complete", {
+                        "status": "done",
+                        "records": created_records,
+                        "backend_used": created_records[-1].get("_backend_used", "") if created_records else "",
+                    })
 
                 else:
                     # Single or sequential: all files combined into one record
@@ -1800,7 +1826,7 @@ class SherpaNoteAPI(Bridge):
                     })
 
                     # Combine all markdown with separator
-                    parts = [d.markdown for d in all_docs if d.markdown.strip()]
+                    parts = [d.markdown for d in all_docs if d.markdown and d.markdown.strip()]
                     text = "\n\n---\n\n".join(parts)
                     segments = self._build_segments(text)
                     first_source = Path(files[0]).stem if files else "OCR"
@@ -1812,7 +1838,12 @@ class SherpaNoteAPI(Bridge):
                     })
                     record = self._annotate_record(record)
                     record = self._auto_process_record(record)
-                    self._emit("ocr_complete", {"status": "done", "records": [record]})
+                    backend_used = all_docs[0].backend if all_docs else ""
+                    self._emit("ocr_complete", {
+                        "status": "done",
+                        "records": [record],
+                        "backend_used": backend_used,
+                    })
 
             except Exception as exc:
                 logger.exception("OCR processing failed")
@@ -1850,44 +1881,67 @@ class SherpaNoteAPI(Bridge):
 
         Runs in background thread, emits progress events.
         """
+        logger.info("Plugin install requested: %s", package_name)
+
         def _work() -> None:
             try:
                 pm = self._get_plugin_manager()
 
                 def on_output(line: str) -> None:
+                    logger.debug("  pip: %s", line)
                     self._emit("plugin_install_progress", {"message": line})
 
+                logger.info("Starting pip install for %s...", package_name)
                 result = pm.install_package(package_name, on_output=on_output)
+                # Invalidate caches so get_available_backends() picks up changes
+                self._plugin_manager = None
+                self._document_extractor = None
                 if result["success"]:
+                    logger.info("Plugin installed: %s v%s", package_name, result.get("version"))
                     self._emit("plugin_install_complete", {
                         "package": package_name,
                         "version": result.get("version"),
                     })
                 else:
+                    logger.error("Plugin install failed: %s", result.get("error"))
                     self._emit("plugin_install_error", {
                         "package": package_name,
                         "error": result.get("error", "Unknown error"),
                     })
             except Exception as e:
+                logger.exception("Plugin install exception: %s", package_name)
+                self._plugin_manager = None
+                self._document_extractor = None
                 self._emit("plugin_install_error", {
                     "package": package_name,
                     "error": str(e),
                 })
 
-        self.dispatch_task("install_plugin", {})
+        import threading
+        thread = threading.Thread(target=_work, daemon=True)
+        thread.start()
         return {"success": True}
 
     @expose
     def uninstall_plugin(self, package_name: str) -> dict:
         """Uninstall a plugin package from the plugin venv."""
+        logger.info("Plugin uninstall requested: %s", package_name)
         try:
             pm = self._get_plugin_manager()
-            # Map display names to pip package names
             from py.plugins.manager import PACKAGE_NAMES
             pip_name = PACKAGE_NAMES.get(package_name, package_name)
+            logger.info("Uninstalling pip package: %s", pip_name)
             result = pm.uninstall_package(pip_name)
+            # Invalidate caches
+            self._plugin_manager = None
+            self._document_extractor = None
+            if result["success"]:
+                logger.info("Plugin uninstalled: %s", package_name)
+            else:
+                logger.error("Plugin uninstall failed: %s", result.get("error"))
             return {"success": result["success"], "data": result}
         except Exception as e:
+            logger.exception("Plugin uninstall exception: %s", package_name)
             return {"success": False, "error": str(e)}
 
     @expose
@@ -1910,12 +1964,73 @@ class SherpaNoteAPI(Bridge):
             return {"success": False, "error": str(e)}
 
     @expose
+    def pre_download_docling(self) -> dict:
+        """Pre-download docling AI models to the configured directory.
+
+        Docling downloads models on first use (~1.5GB). This triggers
+        the download proactively so subsequent extraction is faster.
+        Emits progress events during download.
+        """
+        logger.info("Docling model pre-download requested")
+
+        def _work() -> None:
+            try:
+                extractor = self._get_document_extractor()
+                from py.adapters.docling_adapter import DoclingAdapter
+                # Get the docling adapter from extractor
+                adapter = extractor._get_docling_adapter()
+                if adapter is None or not adapter.is_available():
+                    self._emit("plugin_install_error", {
+                        "package": "docling",
+                        "error": "Docling is not installed. Please install it first.",
+                    })
+                    return
+
+                self._emit("plugin_install_progress", {"message": "正在下载 Docling AI 模型..."})
+
+                result = adapter.pre_download_models()
+
+                if result["success"]:
+                    self._emit("plugin_install_complete", {
+                        "package": "docling-models",
+                        "version": result.get("message", "Done"),
+                    })
+                else:
+                    self._emit("plugin_install_error", {
+                        "package": "docling-models",
+                        "error": result.get("error", "Unknown error"),
+                    })
+            except Exception as e:
+                logger.exception("Docling model pre-download failed")
+                self._emit("plugin_install_error", {
+                    "package": "docling-models",
+                    "error": str(e),
+                })
+
+        import threading
+        thread = threading.Thread(target=_work, daemon=True)
+        thread.start()
+        return {"success": True}
+
+    @expose
     def get_available_backends(self) -> dict:
         """Get availability status of all document extraction backends."""
         try:
             extractor = self._get_document_extractor()
             backends = extractor.get_available_backends()
             return {"success": True, "data": backends}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @expose
+    def destroy_plugin_venv(self) -> dict:
+        """Destroy the entire plugin virtual environment."""
+        try:
+            pm = self._get_plugin_manager()
+            result = pm.destroy_venv()
+            self._plugin_manager = None
+            self._document_extractor = None
+            return {"success": result["success"], "data": result}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

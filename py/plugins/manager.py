@@ -210,8 +210,18 @@ class PluginManager:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                bufsize=1,
             )
-            stdout, _ = proc.communicate(timeout=timeout)
+
+            # Stream output line by line for real-time progress
+            stdout_lines: list[str] = []
+            for line in proc.stdout:
+                line = line.rstrip()
+                stdout_lines.append(line)
+                if on_output and line.strip():
+                    on_output(line.strip())
+
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -223,14 +233,8 @@ class PluginManager:
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
 
-        if on_output and stdout:
-            for line in stdout.splitlines():
-                line = line.strip()
-                if line:
-                    on_output(line)
-
         if proc.returncode != 0:
-            error_msg = f"Installation failed (exit code {proc.returncode}): {stdout[-500:]}"
+            error_msg = f"Installation failed (exit code {proc.returncode}): {''.join(stdout_lines[-10:])}"
             logger.error(error_msg)
             return {"success": False, "error": error_msg}
 
@@ -248,7 +252,7 @@ class PluginManager:
             return {"success": True, "message": "Not installed (no venv)"}
 
         cmd = [
-            self.uv_path, "pip", "uninstall", package_name, "-y",
+            self.uv_path, "pip", "uninstall", package_name,
             "--python", str(get_plugin_venv_python()),
         ]
 

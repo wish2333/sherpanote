@@ -6,7 +6,7 @@
  * manage AI provider presets, and download ASR models.
  * Uses store.showToast for feedback instead of inline message.
  */
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useAppStore } from "../stores/appStore";
 import {
@@ -31,7 +31,8 @@ import {
   deleteOcrModel,
 } from "../bridge";
 import type { BackupOptions, BackupSummary } from "../bridge";
-import type { AiConfig, AsrConfig, OcrConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus, OcrModelFileInfo } from "../types";
+import type { AiConfig, AsrConfig, OcrConfig, PluginConfig, DocumentConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus, OcrModelFileInfo } from "../types";
+import DocumentSettingsPanel from "../components/settings/DocumentSettingsPanel.vue";
 
 const store = useAppStore();
 const router = useRouter();
@@ -39,6 +40,8 @@ const router = useRouter();
 const aiConfig = ref<AiConfig>(store.aiConfig);
 const asrConfig = ref<AsrConfig>(store.asrConfig);
 const ocrConfig = ref<OcrConfig>(store.ocrConfig);
+const pluginConfig = ref<PluginConfig>(store.pluginConfig);
+const documentConfig = ref<DocumentConfig>(store.documentConfig);
 const autoAiModes = ref<string[]>(store.autoAiModes);
 const maxTokensMode = ref<"auto" | "custom" | "default">("auto");
 const maxVersions = ref(20);
@@ -552,7 +555,7 @@ async function handlePickCookieFile() {
 // ---- Config ----
 
 async function loadConfig() {
-  const res = await call<{ ai: AiConfig; asr: AsrConfig; ocr?: OcrConfig; auto_ai_modes?: string[]; max_tokens_mode?: string; max_versions?: number }>("get_config");
+  const res = await call<{ ai: AiConfig; asr: AsrConfig; ocr?: OcrConfig; plugin?: PluginConfig; document?: DocumentConfig; auto_ai_modes?: string[]; max_tokens_mode?: string; max_versions?: number }>("get_config");
   if (res.success && res.data) {
     if (res.data.ai) {
       aiConfig.value = res.data.ai;
@@ -571,6 +574,14 @@ async function loadConfig() {
     if (res.data.ocr) {
       ocrConfig.value = res.data.ocr;
       store.ocrConfig = res.data.ocr;
+    }
+    if (res.data.plugin) {
+      pluginConfig.value = res.data.plugin;
+      store.pluginConfig = res.data.plugin;
+    }
+    if (res.data.document) {
+      documentConfig.value = res.data.document;
+      store.documentConfig = res.data.document;
     }
     autoAiModes.value = res.data.auto_ai_modes ?? [];
     store.autoAiModes = autoAiModes.value;
@@ -592,6 +603,8 @@ async function saveConfig() {
     ai: aiConfig.value,
     asr: asrToSave,
     ocr: ocrConfig.value,
+    plugin: pluginConfig.value,
+    document: documentConfig.value,
     auto_ai_modes: autoAiModes.value,
     max_tokens_mode: maxTokensMode.value,
     max_versions: maxVersions.value,
@@ -600,6 +613,8 @@ async function saveConfig() {
     store.aiConfig = aiConfig.value;
     store.asrConfig = asrToSave;
     store.ocrConfig = ocrConfig.value;
+    store.pluginConfig = pluginConfig.value;
+    store.documentConfig = documentConfig.value;
     store.autoAiModes = autoAiModes.value;
     store.showToast("Configuration saved", "success");
   } else {
@@ -607,6 +622,33 @@ async function saveConfig() {
   }
   isSaving.value = false;
 }
+
+// ---- Auto-save on Document / Plugin config changes ----
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+function autoSaveConfig() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    const asrToSave = { ...asrConfig.value };
+    if (asrToSave.language === "__custom__") {
+      asrToSave.language = customLanguage.value || "auto";
+    }
+    const res = await call("update_config", {
+      ai: aiConfig.value,
+      asr: asrToSave,
+      ocr: ocrConfig.value,
+      plugin: pluginConfig.value,
+      document: documentConfig.value,
+      auto_ai_modes: autoAiModes.value,
+      max_tokens_mode: maxTokensMode.value,
+      max_versions: maxVersions.value,
+    });
+    if (res.success) {
+      store.pluginConfig = pluginConfig.value;
+      store.documentConfig = documentConfig.value;
+    }
+  }, 500);
+}
+watch(() => [pluginConfig.value, documentConfig.value], autoSaveConfig, { deep: true });
 
 async function testConnection() {
   isTesting.value = true;
@@ -786,7 +828,7 @@ function availableModelTypes(version: string, role: string): ("mobile" | "server
 
 // ---- Backup / Restore ----
 const backupOptions = ref<BackupOptions>({
-  include_config: true,
+  include_config: false,
   include_presets: true,
   include_records: true,
   include_versions: true,
@@ -930,7 +972,7 @@ onUnmounted(() => {
         class="tab"
         :class="{ 'tab-active': activeTab === 'ocr' }"
         @click="activeTab = 'ocr'"
-      >OCR</a>
+      >OCR / Documents</a>
       <a
         class="tab"
         :class="{ 'tab-active': activeTab === 'backup' }"
@@ -1081,6 +1123,15 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- Document Settings Panel (plugins, engine selection, environment) -->
+      <DocumentSettingsPanel
+        :plugin-config="pluginConfig"
+        :document-config="documentConfig"
+        @update:plugin-config="pluginConfig = $event"
+        @update:document-config="documentConfig = $event"
+        @save-requested="saveConfig"
+      />
     </div>
 
     <!-- Backup -->

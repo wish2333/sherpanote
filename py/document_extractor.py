@@ -16,13 +16,14 @@ Decision tree:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from py.outputs.unified_document import ExtractedDocument
 from py.text_detector import FileTypeInfo, classify_file, has_text_layer
 
 if TYPE_CHECKING:
-    from py.config import DocumentConfig
+    from py.config import DocumentConfig, PluginConfig
     from py.ocr import OcrEngine
     from py.plugins.manager import PluginManager
 
@@ -50,10 +51,12 @@ class DocumentExtractor:
         ocr_engine: OcrEngine,
         plugin_manager: PluginManager | None = None,
         doc_config: DocumentConfig | None = None,
+        plugin_config: PluginConfig | None = None,
     ) -> None:
         self._ocr_engine = ocr_engine
         self._plugin_manager = plugin_manager
         self._doc_config = doc_config
+        self._plugin_config = plugin_config
 
         # Built-in adapters (always available)
         self._ppocr_adapter = None
@@ -78,13 +81,17 @@ class DocumentExtractor:
     def _get_docling_adapter(self):
         from py.adapters.docling_adapter import DoclingAdapter
         if self._docling_adapter is None and self._plugin_manager is not None:
-            self._docling_adapter = DoclingAdapter(self._plugin_manager)
+            artifacts = "data/docling"
+            if self._plugin_config and self._plugin_config.docling_artifacts_path:
+                artifacts = self._plugin_config.docling_artifacts_path
+            self._docling_adapter = DoclingAdapter(self._plugin_manager, artifacts_path=artifacts)
         return self._docling_adapter
 
     def _get_opendata_adapter(self):
         from py.adapters.opendata_adapter import OpendataAdapter
         if self._opendata_adapter is None and self._plugin_manager is not None:
-            self._opendata_adapter = OpendataAdapter(self._plugin_manager)
+            java_path = self._plugin_config.manual_java_path if self._plugin_config else None
+            self._opendata_adapter = OpendataAdapter(self._plugin_manager, manual_java_path=java_path)
         return self._opendata_adapter
 
     def classify(self, file_path: str) -> FileTypeInfo:

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { TranscriptRecord, AiConfig, AsrConfig, OcrConfig } from "../types";
+import type { TranscriptRecord, AiConfig, AsrConfig, OcrConfig, PluginConfig, DocumentConfig } from "../types";
 
 /** A single toast notification entry. */
 export interface Toast {
@@ -92,6 +92,18 @@ export const useAppStore = defineStore("app", () => {
     cls_model_type: "server",
   });
 
+  /* ---- Plugin config ---- */
+  const pluginConfig = ref<PluginConfig>({
+    manual_java_path: null,
+    docling_artifacts_path: null,
+  });
+
+  /* ---- Document extraction config ---- */
+  const documentConfig = ref<DocumentConfig>({
+    text_pdf_engine: "markitdown",
+    scan_pdf_engine: "ppocr",
+  });
+
   /* ---- toast notifications ---- */
   const toasts = ref<Toast[]>([]);
 
@@ -121,6 +133,8 @@ export const useAppStore = defineStore("app", () => {
     aiConfig,
     asrConfig,
     ocrConfig,
+    pluginConfig,
+    documentConfig,
     autoAiModes,
     toasts,
     showToast,

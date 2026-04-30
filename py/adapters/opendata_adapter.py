@@ -26,14 +26,20 @@ class OpendataAdapter:
     def __init__(
         self,
         plugin_manager: PluginManager,
+        manual_java_path: str | None = None,
     ) -> None:
         self._manager = plugin_manager
+        self._manual_java_path = manual_java_path
+
+    @property
+    def java_path(self) -> str | None:
+        """Get the resolved Java path (manual override or auto-detected)."""
+        return self._get_java_path()
 
     def is_available(self) -> bool:
         """Check if opendataloader-pdf is installed and Java is available."""
         if not self._manager.is_package_installed("opendataloader-pdf"):
             return False
-        # Quick Java check
         from py.plugins.java_detect import validate_java_version
         java_path = self._get_java_path()
         if java_path is None:
@@ -54,35 +60,32 @@ class OpendataAdapter:
             PluginError: If subprocess fails.
             RuntimeError: If Java is not available.
         """
-        self._check_java()
+        java_path = self._get_java_path()
+        if java_path is None:
+            raise RuntimeError(
+                "Java 11+ required for opendataloader-pdf. "
+                "Install from https://adoptium.net/ or set path in settings."
+            )
 
         from py.plugins.runner import run
 
-        logger.info("opendataloader-pdf extraction: %s", file_path)
+        logger.info("opendataloader-pdf extraction (Java: %s): %s", java_path, file_path)
 
         result = run(
             plugin_module=_RUNNER_MODULE,
-            args={"file_path": file_path},
+            args={"file_path": file_path, "java_path": java_path},
             timeout=300,
         )
 
         return _parse_result(result)
 
-    def _check_java(self) -> None:
-        """Verify Java is available. Raises RuntimeError if not."""
-        from py.plugins.java_detect import detect_java
-
-        detection = detect_java()
-        if not detection.found:
-            raise RuntimeError(
-                f"Java 11+ required for opendataloader-pdf: {detection.error}"
-            )
-
     def _get_java_path(self) -> str | None:
-        """Get the detected Java path."""
+        """Get the Java path: manual override first, then auto-detect."""
         from py.plugins.java_detect import detect_java
-        detection = detect_java()
-        return detection.path
+        detection = detect_java(manual_path=self._manual_java_path)
+        if detection.found:
+            return detection.path
+        return None
 
 
 def _parse_result(result: "RunResult") -> ExtractedDocument:
@@ -97,7 +100,7 @@ def _parse_result(result: "RunResult") -> ExtractedDocument:
         )
 
     return ExtractedDocument(
-        markdown=data.get("markdown", ""),
+        markdown=data.get("markdown") or "",
         metadata=data.get("metadata", {}),
         tables=(),
         images=(),

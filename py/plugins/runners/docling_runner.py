@@ -24,26 +24,40 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _run_docling(file_path: str, method: str) -> dict:
+def _setup_hf_home(artifacts_path: str | None) -> str:
+    """Set HF_HOME to redirect model cache to artifacts_path."""
+    import os as _os
+    target = str(Path(artifacts_path or "data/docling").resolve())
+    _os.makedirs(target, exist_ok=True)
+    _os.environ["HF_HOME"] = target
+    return target
+
+
+def _run_docling(file_path: str, method: str, artifacts_path: str | None = None) -> dict:
     """Call docling to extract document content.
 
     Args:
         file_path: Path to the input document.
         method: "text_layer" for text PDFs, "ocr" for scanned PDFs.
+        artifacts_path: Optional model cache root (sets HF_HOME).
 
     Returns:
         Dict matching ExtractedDocument fields.
     """
+    _setup_hf_home(artifacts_path)
+
     from docling.document_converter import DocumentConverter, PdfFormatOption
-    from docling.backend.pdf_backend import PdfPipelineOptions
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.datamodel.base_models import InputFormat
 
-    # Configure pipeline based on method
     pipeline_options = PdfPipelineOptions()
     pipeline_options.do_ocr = (method == "ocr")
 
     if method == "ocr":
-        pipeline_options.ocr_engine = "rapidocr_onnx"
+        from docling.datamodel.pipeline_options import RapidOcrOptions
+        pipeline_options.ocr_options = RapidOcrOptions(
+            lang=["english", "chinese"],
+        )
 
     format_options = {
         InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
@@ -58,49 +72,69 @@ def _run_docling(file_path: str, method: str) -> dict:
 
     _emit_progress(80, "Building output")
 
-    # Extract content
-    markdown = result.document.export_to_markdown()
+    # Extract markdown content
+    doc = result.document
+    markdown = doc.export_to_markdown() if doc else ""
 
     # Build metadata
-    metadata: dict[str, str] = {
-        "page_count": "1",
-    }
-    if result.document and hasattr(result.document, "name"):
-        metadata["title"] = result.document.name
-    if result.pages:
-        metadata["page_count"] = str(len(result.pages))
+    page_count = "1"
+    if doc and doc.num_pages:
+        page_count = str(doc.num_pages)
 
-    # Extract tables if available
-    tables = []
-    if result.document and hasattr(result.document, "tables"):
-        for table in result.document.tables:
-            tables.append({
-                "markdown": getattr(table, "export_to_markdown", lambda: str(table.data))(),
-            })
+    metadata: dict[str, str] = {"page_count": page_count}
 
-    # Extract images if available
-    images = []
-    img_idx = 0
-    if result.document and hasattr(result.document, "pictures"):
-        for pic in result.document.pictures:
-            images.append({
-                "index": img_idx,
-                "alt_text": getattr(pic, "caption", ""),
-                "mime_type": "image/png",
-            })
-            img_idx += 1
+    # Extract title from document name if available
+    if doc and hasattr(doc, "name") and doc.name:
+        metadata["title"] = doc.name
 
     _emit_progress(100, "Done")
 
     return {
         "markdown": markdown,
         "metadata": metadata,
-        "tables": tables,
-        "images": images,
+        "tables": [],
+        "images": [],
         "raw_format": "docling",
         "backend": "docling",
         "source_path": str(file_path),
     }
+
+
+def _pre_download_models(artifacts_path: str | None = None) -> dict:
+    """Pre-download docling models by triggering a conversion.
+
+    HF_HOME is redirected to artifacts_path, so docling downloads
+    models there via huggingface_hub on first use.
+    """
+    import tempfile as _tf
+    import os as _os
+
+    target = _setup_hf_home(artifacts_path)
+    _emit_progress(0, f"Model directory: {target}")
+
+    minimal_pdf = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n"
+        b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n"
+        b"0000000058 00000 n \n0000000115 00000 n \n"
+        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF"
+    )
+    tmp_path = None
+    try:
+        fd, tmp_path = _tf.mkstemp(suffix=".pdf")
+        _os.close(fd)
+        with open(tmp_path, "wb") as f:
+            f.write(minimal_pdf)
+        _emit_progress(10, "Downloading docling models...")
+        _run_docling(tmp_path, "text_layer", artifacts_path)
+        _emit_progress(100, f"Models ready in {target}")
+    finally:
+        if tmp_path:
+            try: _os.unlink(tmp_path)
+            except OSError: pass
+
+    return {"message": f"Models downloaded to {target}"}
 
 
 def _emit_progress(percent: int, message: str) -> None:
@@ -127,6 +161,21 @@ def main() -> None:
         _fail(f"Invalid --json-input: {exc}")
         return
 
+    command = args.get("command", "extract")
+    artifacts_path = args.get("artifacts_path")
+
+    # Route to command handler
+    if command == "pre_download":
+        try:
+            result = _pre_download_models(artifacts_path)
+            json.dump({"success": True, "result": result}, sys.stdout)
+            print()
+        except Exception as exc:
+            import traceback
+            _fail(str(exc), traceback.format_exc())
+        return
+
+    # Default: extract
     file_path = args.get("file_path", "")
     method = args.get("method", "text_layer")
 
@@ -139,7 +188,7 @@ def main() -> None:
         return
 
     try:
-        result = _run_docling(file_path, method)
+        result = _run_docling(file_path, method, artifacts_path)
         json.dump({"success": True, "result": result}, sys.stdout)
         print()  # trailing newline
     except Exception as exc:
