@@ -97,6 +97,8 @@ hiddenimports = [
     "cv2",
     # document extraction backends
     "markitdown",
+    # markitdown dependency for file type detection
+    "magika",
     "pdfplumber",
     "pypdfium2",
     "PIL",
@@ -164,6 +166,29 @@ for _cfg_name in ("config.yaml", "default_models.yaml"):
 
 # cv2 data files (haarcascades, etc.) are collected automatically
 # by PyInstaller through hiddenimports -- no manual collection needed.
+
+# markitdown uses magika for file type detection; collect its model files and config.
+try:
+    import magika as _magika  # noqa: E402
+    _magika_pkg = _Path(_magika.__file__).parent
+    # Collect models
+    _magika_models = _magika_pkg / "models"
+    if _magika_models.exists():
+        for _f in _magika_models.rglob("*"):
+            if _f.is_file():
+                _rel = _f.relative_to(_magika_pkg)
+                a.datas.append((str(_Path("magika") / _rel), str(_f), "DATA"))
+        print(f"[DEBUG] magika models: {_magika_models}")
+    # Collect config
+    _magika_config = _magika_pkg / "config"
+    if _magika_config.exists():
+        for _f in _magika_config.rglob("*"):
+            if _f.is_file():
+                _rel = _f.relative_to(_magika_pkg)
+                a.datas.append((str(_Path("magika") / _rel), str(_f), "DATA"))
+        print(f"[DEBUG] magika config: {_magika_config}")
+except ImportError:
+    print("[DEBUG] magika not installed, skipping model collection")
 
 # Plugin system: collect bundled Python and uv if available.
 # These are downloaded by build.py --with-plugins and placed in build/plugins_support/.

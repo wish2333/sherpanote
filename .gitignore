@@ -170,10 +170,10 @@ cython_debug/
 .DS_Store
 
 # Test
-test/
-logs/
-data/
-models/
+/test/
+/logs/
+/data/
+/models/
 
 # bun
 node_modules/

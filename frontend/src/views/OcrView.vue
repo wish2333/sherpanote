@@ -7,9 +7,9 @@
  */
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
-import { onEvent, pickImageFiles, ocrProcess, cancelOcr, getImagePreview, call, getAvailableBackends, detectPdfTextLayer } from "../bridge";
+import { onEvent, pickImageFiles, ocrProcess, cancelOcr, getImagePreview, call, getAvailableBackends, getPluginStatus, detectPdfTextLayer } from "../bridge";
 import { useAppStore } from "../stores/appStore";
-import type { OcrFileEntry, OcrMode, DocumentConfig, PluginConfig } from "../types";
+import type { OcrFileEntry, OcrMode, DocumentConfig, PluginConfig, PluginPackageStatus } from "../types";
 
 const router = useRouter();
 const store = useAppStore();
@@ -43,16 +43,33 @@ async function detectTextLayer(filePath: string) {
 
 // ---- Engine availability ----
 const availableBackends = ref<Record<string, boolean>>({});
+const pluginStatuses = ref<Record<string, PluginPackageStatus>>({});
 const textEngine = computed(() => (store.documentConfig as DocumentConfig).text_pdf_engine);
 const scanEngine = computed(() => (store.documentConfig as DocumentConfig).scan_pdf_engine);
 
 async function loadBackends() {
-  const res = await getAvailableBackends();
-  if (res.success && res.data) availableBackends.value = res.data;
+  const [backendRes, statusRes] = await Promise.all([
+    getAvailableBackends(),
+    getPluginStatus(),
+  ]);
+  if (backendRes.success && backendRes.data) availableBackends.value = backendRes.data;
+  if (statusRes.success && statusRes.data) {
+    const map: Record<string, PluginPackageStatus> = {};
+    for (const [key, val] of Object.entries(statusRes.data)) {
+      map[key] = { name: key, installed: val.installed, version: val.version };
+    }
+    pluginStatuses.value = map;
+  }
 }
 
-const isDoclingAvail = computed(() => availableBackends.value.docling === true);
-const isOpendataAvail = computed(() => availableBackends.value.opendataloader === true);
+const isDoclingAvail = computed(
+  () => availableBackends.value.docling === true
+     || pluginStatuses.value.docling?.installed === true,
+);
+const isOpendataAvail = computed(
+  () => availableBackends.value.opendataloader === true
+     || pluginStatuses.value.opendataloader?.installed === true,
+);
 
 // ---- Engine change handler ----
 async function setTextEngine(engine: DocumentConfig["text_pdf_engine"]) {

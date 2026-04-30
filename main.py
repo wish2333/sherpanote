@@ -2222,7 +2222,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     # Enable faulthandler to catch segfaults and other fatal errors
-    log_dir = Path(__file__).parent / "logs"
+    log_dir = Path(__file__).parent / "data" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     fault_log = log_dir / "faults.log"
     faulthandler.enable(file=open(fault_log, "a", encoding="utf-8"))

@@ -52,16 +52,38 @@ def get_model_root_dir() -> Path:
     """Return the directory where RapidOCR stores downloaded models.
 
     Dev: rapidocr/models/ inside the installed package.
-    Packaged (PyInstaller): {exe_dir}/_internal/rapidocr/models/ (onedir)
-                             or {exe_dir}/rapidocr/models/ (if bundled at root)
+    Packaged (PyInstaller):
+      - Windows onedir: {exe_dir}/_internal/rapidocr/models/
+      - macOS .app: {exe_dir}/../Resources/rapidocr/models/
+      - Linux onedir: {exe_dir}/_internal/rapidocr/models/
     """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
-        # PyInstaller onedir: data files go into _internal/
+
+        # Check for macOS .app bundle structure
+        if exe_dir.name == "MacOS" and (exe_dir.parent / "Resources").exists():
+            # Running inside .app bundle
+            resources_dir = exe_dir.parent / "Resources"
+            rapidocr_models = resources_dir / "rapidocr" / "models"
+            if rapidocr_models.exists():
+                return rapidocr_models
+            # Return expected path even if doesn't exist yet
+            return rapidocr_models
+
+        # Windows/Linux onedir structure
         internal_dir = exe_dir / "_internal"
-        if internal_dir.exists():
+        if (internal_dir / "rapidocr" / "models").exists():
+            return internal_dir / "rapidocr" / "models"
+
+        # Fallback: try direct rapidocr/models
+        if (exe_dir / "rapidocr" / "models").exists():
+            return exe_dir / "rapidocr" / "models"
+
+        # Last resort: check both locations
+        if (internal_dir / "rapidocr" / "models").is_dir():
             return internal_dir / "rapidocr" / "models"
         return exe_dir / "rapidocr" / "models"
+
     from rapidocr.main import root_dir as _rapidocr_root
     return _rapidocr_root / "models"
 
