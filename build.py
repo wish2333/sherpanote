@@ -772,7 +772,7 @@ def _download_plugin_runtime() -> None:
         shutil.copytree(str(install_root), str(pbs_target))
 
         # Verify
-        py_exe = pbs_target / ("python.exe" if sys.platform == "win32" else "bin" / "python3")
+        py_exe = pbs_target / ("python.exe" if sys.platform == "win32" else Path("bin") / "python3")
         if py_exe.exists():
             _info(f"[plugins] Bundled Python: {py_exe}")
         else:
