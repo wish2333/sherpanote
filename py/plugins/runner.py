@@ -66,11 +66,18 @@ def _build_subprocess_env() -> dict[str, str]:
 
     Ensures ``PYTHONPATH`` includes the parent of the ``py`` package so
     that ``python -m py.plugins.runners.xxx`` works in the plugin venv.
+
+    On Windows, also disables HuggingFace symlink creation to avoid
+    ``WinError 1314`` (privilege required) in packaged apps.
     """
     env = os.environ.copy()
     py_parent = str(get_py_package_parent())
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = py_parent + os.pathsep + existing if existing else py_parent
+
+    if sys.platform == "win32":
+        env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
     return env
 
 

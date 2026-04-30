@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,11 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_KEY = "app_config"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent  # py/config.py -> project root
-_DEFAULT_DATA_DIR = str(_PROJECT_ROOT / "data")
+
+if getattr(sys, "frozen", False):
+    _DEFAULT_DATA_DIR = str(Path(sys.executable).resolve().parent / "data")
+else:
+    _DEFAULT_DATA_DIR = str(_PROJECT_ROOT / "data")
 _DEFAULT_MODELS_DIR = str(_PROJECT_ROOT / "models")
 
 
