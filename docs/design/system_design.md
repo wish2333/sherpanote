@@ -9,6 +9,7 @@
 
 | Version | Changed Module | Description |
 |---------|---------------|-------------|
+| v2.1.0 | Plugins, OCR, Settings | Plugin runtime, docling/opendata adapters, DocumentSettingsPanel, fullscreen drag-drop |
 | v2.0.0 | OCR, Model Management | Added OCR engine, refactored model management |
 | v1.3.0 | ASR, Whisper, CUDA | Added whisper.cpp, GPU detection, video download |
 | v1.2.0 | Model Manager | Multi-source model download, new ASR models |
@@ -36,6 +37,10 @@
                                   [ASR Models]  [OCR Models]
                                         |
                                         v
+                              [Plugin System (uv subprocess)]
+                              [docling] [opendataloader-pdf]
+                                        |
+                                        v
                                   [SQLite (WAL)]
                                         |
                                         v
@@ -52,6 +57,7 @@
 | Application | Business logic, orchestration, model management | Python 3.11+ |
 | Data | Persistence, file storage | SQLite (WAL mode) + local filesystem |
 | AI/ML | Speech recognition, OCR, text generation | sherpa-onnx, whisper.cpp, RapidOCR, OpenAI API |
+| Plugins | Optional advanced extraction engines | docling (RapidOCR), opendataloader-pdf (Java) via uv subprocess |
 
 ---
 

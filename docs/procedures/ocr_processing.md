@@ -3,7 +3,7 @@
 ## Metadata
 
 - **ID**: WF-006
-- **Version**: 2.0.0
+- **Version**: 2.1.0
 - **Owner**: Document Extraction Module (py/document_extractor.py, py/ocr.py, main.py)
 - **Trigger**: User uploads images/PDFs/Office docs on OcrView and starts processing
 - **Last Updated**: 2026-04-29
@@ -24,6 +24,7 @@ Extract text from images, PDFs, and Office documents using an intelligent decisi
         |-- has_text_layer? (pdfplumber, first 3 pages, >50 chars)
         |     |-- Yes --> markitdown
         |     +-- No  --> PP-OCR (pypdfium2 PDF->image -> OCR)
+        |     +-- No  --> docling (if installed, RapidOCR backend)
         +-- Fallback: markitdown failure -> PP-OCR
 ```
 
@@ -37,6 +38,8 @@ Extract text from images, PDFs, and Office documents using an intelligent decisi
 | `py/adapters/markitdown_adapter.py` | markitdown -> ExtractedDocument |
 | `py/outputs/unified_document.py` | ExtractedDocument unified data model |
 | `py/ocr.py` | OcrEngine (RapidOCR) for image OCR + PDF-to-image conversion |
+| `py/plugins/runners/docling_runner.py` | Docling adapter with RapidOCR backend |
+| `py/plugins/runners/opendata_runner.py` | opendataloader-pdf adapter (requires Java) |
 
 ---
 

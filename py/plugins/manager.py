@@ -21,9 +21,9 @@ from py.plugins.paths import (
 
 logger = logging.getLogger(__name__)
 
-# Packages managed by the plugin system
-DOCLING_PACKAGE = "docling"
-OPENDATA_PACKAGE = "opendataloader-pdf"
+# Packages managed by the plugin system (version-pinned)
+DOCLING_PACKAGE = "docling==2.92.0"
+OPENDATA_PACKAGE = "opendataloader-pdf==2.4.0"
 
 # Map display names to install names
 PACKAGE_NAMES: dict[str, str] = {

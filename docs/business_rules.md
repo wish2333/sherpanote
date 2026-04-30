@@ -9,6 +9,7 @@
 
 | Version | Rule Area | Description |
 |---------|-----------|-------------|
+| v2.1.0 | BR-PLUGIN, BR-OCR | Plugin runtime, docling integration, engine selection |
 | v2.0.0 | BR-OCR | OCR naming, processing modes |
 | v1.3.0 | BR-ASR, BR-MODEL | Whisper integration, GPU, model management |
 | v1.2.0 | BR-MODEL | Multi-source download |
@@ -104,6 +105,33 @@
 | v4/v5 models | Support PP-OCRv4 and PP-OCRv5 detection models | N/A |
 | Mobile/Server | Mobile (lightweight) and Server (accurate) variants | N/A |
 | Component-based | det (detection), rec (recognition), cls (classification) managed separately | N/A |
+
+---
+
+## Rule: Plugin System
+
+### BR-PLUGIN-001: Runtime Isolation
+
+| Rule | Description | Exception |
+|------|-------------|-----------|
+| Subprocess execution | Plugins run in bundled Python subprocess via uv | N/A |
+| Dependency isolation | Each plugin manages its own dependencies | N/A |
+| No host pollution | Plugin packages never installed into host environment | N/A |
+
+### BR-PLUGIN-002: Document Extraction Plugins
+
+| Plugin | Purpose | Requirements |
+|--------|---------|-------------|
+| docling | Advanced layout analysis + OCR for scanned PDFs | Python, uses RapidOCR backend |
+| opendataloader-pdf | Java-based PDF extraction with layout preservation | Java 17+ runtime |
+
+### BR-PLUGIN-003: Engine Selection
+
+| Rule | Description | Exception |
+|------|-------------|-----------|
+| User preference persisted | Selected engine saved to config, restored on load | N/A |
+| Fallback on failure | If selected engine fails, fall back to PP-OCR | N/A |
+| Frontend notification | Engine fallback shows user notification | N/A |
 
 ---
 

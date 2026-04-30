@@ -45,6 +45,8 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **PDF text layer detection**: Automatically detects text-layer PDFs and uses markitdown for direct extraction
 - **Office document support**: Extract text from DOCX, PPTX, and XLSX files via markitdown
 - **Scan PDF handling**: Non-text PDFs are converted to images (pypdfium2) then OCR'd
+- **Plugin backends**: Optional advanced engines (docling, opendataloader-pdf) installable from settings
+- **Fullscreen drag-and-drop**: Full-window file drop zone with real-time PDF text layer status
 - **Multiple processing modes**: Batch processing (one record per file) and sequential processing (merged into a single record)
 - **Flexible model selection**: Support for PP-OCRv4 and PP-OCRv5 models with per-component Mobile/Server variants
 - **Built-in model management**: Automatic model download, caching, and lifecycle management via RapidOCR
@@ -58,6 +60,13 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **One-click installation**: Download, install, validate models directly from the app
 - **Custom model support**: Any sherpa-onnx compatible model placed in the models directory is auto-detected
 - **Related links**: Quick access to model sources, subtitle generation tools, and documentation
+
+### Plugin System
+- **Runtime isolation**: Plugins execute in bundled Python subprocess with uv, fully isolated from the host
+- **Document extraction plugins**: Optional advanced engines (docling with RapidOCR, opendataloader-pdf with Java)
+- **Settings UI**: Engine switching, backend management, environment configuration, and Java path detection
+- **Lifecycle management**: One-click install/uninstall with progress logging and status feedback
+- **Auto-configuration**: Docling defaults to RapidOCR backend to reuse existing OCR models
 
 ### User Experience
 - **Notion-inspired design**: Clean, modern interface built with Vue 3 and DaisyUI 5 + Tailwind CSS 4
@@ -191,13 +200,14 @@ sherpanote/
 │   │   │   ├── HomeView.vue          # Record list with search/filter
 │   │   │   ├── RecordView.vue        # Recording and file transcription
 │   │   │   ├── EditorView.vue        # Transcript editing + AI processing
-│   │   │   ├── OcrView.vue           # OCR image recognition (drag-drop, batch/sequential)
-│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR, OCR tabs)
+│   │   │   ├── OcrView.vue           # OCR image recognition (fullscreen drag-drop, batch/sequential)
+│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR, OCR, Document tabs)
 │   │   │   └── AudioManageView.vue   # Audio file management
 │   │   ├── composables/
 │   │   │   ├── useRecording.ts       # Audio capture, resampling, silence detection
 │   │   │   ├── useTranscript.ts      # Transcription event handling
 │   │   │   ├── useAiProcess.ts       # AI streaming and result management
+│   │   │   ├── usePlugin.ts          # Plugin install/uninstall lifecycle management
 │   │   │   └── useStorage.ts         # CRUD operations and version control
 │   │   ├── stores/
 │   │   │   └── appStore.ts           # Global state (config, models, settings)
@@ -219,6 +229,8 @@ sherpanote/
 │   ├── text_detector.py       # File classification + PDF text layer detection
 │   ├── adapters/              # Backend adapters (ppocr, markitdown)
 │   ├── outputs/               # Unified output types (ExtractedDocument)
+│   ├── plugins/               # Plugin system
+│   │   └── runners/           # Plugin runners (docling, opendataloader)
 │   ├── whispercpp.py          # Whisper.cpp ASR backend integration
 │   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
@@ -311,6 +323,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Next-generation speech recognition toolkit
 - **[RapidOCR](https://github.com/RapidAI/RapidOCR)**: Awesome OCR multiple programing languages toolkits
 - **[markitdown](https://github.com/microsoft/markitdown)**: Convert files to Markdown
+- **[docling](https://github.com/docling-project/docling)**: Advanced document extraction with layout analysis
 - **[pywebview](https://github.com/r0x0r/pywebview)**: Cross-platform native GUI library
 - **[PyWebVue](https://github.com/nicepkg/pywebvue)**: Vue + pywebview desktop framework
 - **[Vue.js](https://vuejs.org/)**: Progressive JavaScript framework

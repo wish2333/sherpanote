@@ -18,12 +18,9 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 
 ## [Unreleased]
 
-### Changed
-- Documentation-first development flow established (docs/ structure)
-
 ---
 
-## [2.1.0] - 2026-04-29 (Phase 1)
+## [2.1.0] - 2026-04-30 (Phase 1-3)
 
 ### Added
 - feat(ocr): Multi-backend document extraction system with intelligent decision tree
@@ -32,17 +29,35 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 - feat(ocr): Unified ExtractedDocument output model for all extraction backends
 - feat(ocr): Office file type support in OcrView (DOC badge, file picker filter)
 - feat(ocr): Adapter pattern for document extraction backends (ppocr_adapter, markitdown_adapter)
+- feat(plugins): Plugin runtime architecture with bundled Python + uv subprocess execution
+- feat(plugins): Plugin management settings UI (DocumentSettingsPanel) with engine switching, backend management, and environment configuration
+- feat(plugins): usePlugin composable for plugin install/uninstall lifecycle management
+- feat(plugins): bridge.ts and Pinia store extended with plugin/document config support
+- feat(ui): Fullscreen drag-and-drop layout for OCR page with auto PDF text layer detection in file list
+- feat(plugins): Docling default OCR backend configured to use RapidOCR
 
 ### Changed
 - refactor(ocr): Replace PyMuPDF (AGPL) with pypdfium2 (BSD) for PDF-to-image rendering
 - refactor(ocr): Refactor ocr_process to use DocumentExtractor decision tree instead of direct OcrEngine calls
 - refactor(ocr): New module structure: document_extractor.py, text_detector.py, adapters/, outputs/
+- refactor(ui): Settings changes auto-save with full Chinese localization
+
+### Fixed
+- fix(ocr): Fix engine selection cache not invalidating on switch
+- fix(plugins): Fix install operation with no log output
+- fix(plugins): Fix uninstall -y flag error
+- fix(plugins): Fix Java path not passed through execution chain
+- fix(ocr): Fix engine fallback with no frontend notification
+- fix(plugins): Fix Docling v2 API compatibility
+- fix(plugins): Fix opendata runner output format
+- fix(ocr): Fix temp file cleanup in opendata runner
 
 ### Decision Tree
 ```
 Image -> PP-OCR (RapidOCR)
 Office (DOCX/PPTX/XLSX) -> markitdown
 PDF -> text layer detection -> markitdown (has text) / PP-OCR (no text)
+PDF (scanned, with docling) -> docling with RapidOCR backend
 Fallback: markitdown failure on text PDF -> PP-OCR
 ```
 

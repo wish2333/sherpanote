@@ -4,25 +4,25 @@ version = "2.1.0"
 description = "An intelligent voice learning assistant that combines real-time speech recognition with AI-powered text processing."
 requires-python = ">=3.11"
 dependencies = [
-    "audioread>=3.0.0",
-    "huggingface_hub>=0.20.0",
-    "onnxruntime>=1.24.4",
-    "openai>=1.50.0",
-    "markitdown[pdf,docx,pptx,xlsx]>=0.1.0",
-    "pypdfium2>=4.30.0",
-    "python-docx>=1.1.0",
-    "pywebview>=6.0",
-    "rapidocr>=3.8.1",
-    "sherpa-onnx>=1.10.0",
-    "sherpa-onnx-bin>=1.12.35",
-    "soundfile>=0.12.0",
-    "static-ffmpeg>=3.0",
-    "yt-dlp>=2024.3.10",
+    "audioread==3.1.0",
+    "huggingface_hub==1.9.2",
+    "onnxruntime==1.24.4",
+    "openai==2.30.0",
+    "markitdown[pdf,docx,pptx,xlsx]==0.1.5",
+    "pypdfium2==5.7.1",
+    "python-docx==1.2.0",
+    "pywebview==6.1",
+    "rapidocr==3.8.1",
+    "sherpa-onnx==1.12.35",
+    "sherpa-onnx-bin==1.12.35",
+    "soundfile==0.13.1",
+    "static-ffmpeg==3.0",
+    "yt-dlp==2026.3.17",
 ]
 
 [dependency-groups]
 dev = [
-    "pyinstaller>=6.19.0",
+    "pyinstaller==6.19.0",
 ]
 
 [build-system]

@@ -17,6 +17,8 @@
 | PDF Rendering | pypdfium2 | latest |
 | PDF Text Detection | pdfplumber (via markitdown) | latest |
 | Document Extraction | markitdown | latest |
+| Plugin: docling | docling (with RapidOCR OCR backend) | latest |
+| Plugin: opendataloader | opendataloader-pdf (requires Java 17+) | latest |
 | AI Integration | openai (Python SDK) | latest |
 | Frontend Framework | Vue 3 | 3.5+ |
 | Frontend Language | TypeScript | 5.x |
@@ -49,6 +51,10 @@ sherpanote/
       markitdown_adapter.py    # markitdown -> ExtractedDocument adapter
     outputs/
       unified_document.py      # ExtractedDocument unified data model
+    plugins/                   # Plugin system
+      runners/
+        docling_runner.py      # docling adapter with RapidOCR backend
+        opendata_runner.py     # opendataloader-pdf adapter (requires Java)
     llm.py                    # AI text processing (OpenAI API)
     model_manager.py          # ASR model download and management
     model_registry.py         # ASR model definitions
@@ -69,8 +75,9 @@ sherpanote/
       bridge.ts               # Python bridge interface
       components/             # Reusable Vue components
       views/                  # Page views (Home, Record, Editor, Settings, OCR, AudioManage)
+      components/settings/    # Settings sub-components (DocumentSettingsPanel, etc.)
       stores/                 # Pinia stores (appStore.ts)
-      composables/            # Vue composables (useRecording, useTranscript, useAiProcess, etc.)
+      composables/            # Vue composables (useRecording, useTranscript, useAiProcess, usePlugin, etc.)
       types/                  # TypeScript type definitions
       styles/                 # Global styles
       router/                 # Vue Router configuration
