@@ -80,8 +80,9 @@ class DocumentExtractor:
 
     def _get_docling_adapter(self):
         from py.adapters.docling_adapter import DoclingAdapter
+        from py.plugins.paths import _get_base_dir
         if self._docling_adapter is None and self._plugin_manager is not None:
-            artifacts = "data/docling"
+            artifacts = str(_get_base_dir() / "data" / "docling")
             if self._plugin_config and self._plugin_config.docling_artifacts_path:
                 artifacts = self._plugin_config.docling_artifacts_path
             hf_endpoint = self._plugin_config.hf_endpoint if self._plugin_config else None

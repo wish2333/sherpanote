@@ -95,6 +95,20 @@ def get_plugin_venv_dir() -> Path:
     return get_plugin_base_dir() / ".venv"
 
 
+def get_py_package_parent() -> Path:
+    """Return the parent directory of the bundled ``py`` package.
+
+    Plugin subprocesses need this on ``PYTHONPATH`` so that
+    ``python -m py.plugins.runners.xxx`` can resolve the ``py`` package.
+
+    Returns the internal resources dir in frozen mode, or the project
+    root in development mode -- both are parents of the ``py/`` directory.
+    """
+    if getattr(sys, "frozen", False):
+        return _get_internal_dir()
+    return Path(__file__).resolve().parent.parent.parent
+
+
 def get_plugin_venv_python() -> Path:
     """Return the Python executable inside the plugin venv.
 

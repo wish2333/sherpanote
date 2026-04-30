@@ -10,12 +10,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from py.plugins.paths import get_plugin_venv_python
+from py.plugins.paths import get_plugin_venv_python, get_py_package_parent
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,19 @@ def _decode_args(encoded: str) -> dict[str, Any]:
     return json.loads(base64.b64decode(encoded).decode())
 
 
+def _build_subprocess_env() -> dict[str, str]:
+    """Build environment dict for plugin subprocesses.
+
+    Ensures ``PYTHONPATH`` includes the parent of the ``py`` package so
+    that ``python -m py.plugins.runners.xxx`` works in the plugin venv.
+    """
+    env = os.environ.copy()
+    py_parent = str(get_py_package_parent())
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = py_parent + os.pathsep + existing if existing else py_parent
+    return env
+
+
 def run(
     plugin_module: str,
     args: dict[str, Any],
@@ -95,6 +109,8 @@ def run(
 
     logger.debug("Running plugin subprocess: %s", " ".join(cmd))
 
+    env = _build_subprocess_env()
+
     try:
         proc = subprocess.run(
             cmd,
@@ -105,6 +121,7 @@ def run(
             encoding="utf-8",
             errors="replace",
             creationflags=_SUBPROCESS_FLAGS,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         raise PluginError(
@@ -195,6 +212,8 @@ def run_with_progress(
 
     logger.debug("Running plugin subprocess (with progress): %s", " ".join(cmd))
 
+    env = _build_subprocess_env()
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -204,6 +223,7 @@ def run_with_progress(
             encoding="utf-8",
             errors="replace",
             creationflags=_SUBPROCESS_FLAGS,
+            env=env,
         )
     except Exception as exc:
         raise PluginError(
