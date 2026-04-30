@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [2.1.0] - 2026-04-30
+
+### New
+
+- OCR/Document settings panel with PDF mode selection, backend management, and Java environment auto-detection
+- Multi-backend document extraction system with intelligent decision tree (markitdown, PP-OCR, docling, opendataloader-pdf)
+- Plugin system with runtime isolation: bundled Python + uv subprocess for docling and opendataloader-pdf
+- Fullscreen drag-and-drop layout for OCR page with auto PDF text layer detection
+- PyPI and HuggingFace mirror source configuration for plugin installation and model downloads
+- Docling model pre-download with configurable model directory
+- Upload file format validation with user-friendly error messages
+- Engine fallback warning when configured engine is unavailable
+- Auto-save for plugin and document configuration changes
+- AI processing support for 30+ audio and video file formats via FFmpeg
+
+### Fixes
+
+- Fixed PDF engine switch not taking effect after change
+- Fixed plugin install/uninstall with no log output and unresponsive progress
+- Fixed custom Java path not actually taking effect
+- Fixed opendataloader-pdf producing empty output after processing
+- Fixed settings text overflow in container
+- Fixed OCR engine selection not syncing with saved config on startup
+- Fixed plugin engine options still showing as uninstalled after installation
+- Fixed export backup defaulting to select app configuration
+- Fixed drag-and-drop upload area not covering full screen
+- Fixed home page stuck on loading animation after packaging
+- Fixed AI processing status indicator occasionally missing in record list
+- Fixed model call failure due to whitespace in model name
+- Fixed model directory configuration issue preventing local model discovery
+- Fixed pypdfium2 segfault when importing PDFs on macOS
+- Fixed Java detection result display issue in document settings panel
+
+### Optimizations
+
+- Scanned PDFs automatically skip opendataloader, use OCR directly
+- Optimized list queries with reduced redundant queries for faster loading
+- Auto-cleanup of opendataloader-pdf temp files after processing
+
 ## [2.0.1] - 2026-04-22
 
 ### New

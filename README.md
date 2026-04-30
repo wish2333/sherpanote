@@ -40,9 +40,14 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Import/Export**: Support for Markdown, TXT, DOCX, and SRT formats
 
 ### OCR Image Recognition
-- **Image text recognition**: Extract text from single images, multiple images, and PDF files
-- **Multiple processing modes**: Batch processing (one record per image) and sequential processing (merged into a single record)
-- **PDF support**: Automatic page-to-image conversion and sequential OCR processing
+- **Multi-backend extraction**: Intelligent decision tree routes files to optimal backends
+- **Image text recognition**: Extract text from images using PP-OCR (RapidOCR)
+- **PDF text layer detection**: Automatically detects text-layer PDFs and uses markitdown for direct extraction
+- **Office document support**: Extract text from DOCX, PPTX, and XLSX files via markitdown
+- **Scan PDF handling**: Non-text PDFs are converted to images (pypdfium2) then OCR'd
+- **Plugin backends**: Optional advanced engines (docling, opendataloader-pdf) installable from settings
+- **Fullscreen drag-and-drop**: Full-window file drop zone with real-time PDF text layer status
+- **Multiple processing modes**: Batch processing (one record per file) and sequential processing (merged into a single record)
 - **Flexible model selection**: Support for PP-OCRv4 and PP-OCRv5 models with per-component Mobile/Server variants
 - **Built-in model management**: Automatic model download, caching, and lifecycle management via RapidOCR
 - **Real-time progress**: Drag-and-drop file upload with live processing progress display
@@ -55,6 +60,13 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **One-click installation**: Download, install, validate models directly from the app
 - **Custom model support**: Any sherpa-onnx compatible model placed in the models directory is auto-detected
 - **Related links**: Quick access to model sources, subtitle generation tools, and documentation
+
+### Plugin System
+- **Runtime isolation**: Plugins execute in bundled Python subprocess with uv, fully isolated from the host
+- **Document extraction plugins**: Optional advanced engines (docling with RapidOCR, opendataloader-pdf with Java)
+- **Settings UI**: Engine switching, backend management, environment configuration, and Java path detection
+- **Lifecycle management**: One-click install/uninstall with progress logging and status feedback
+- **Auto-configuration**: Docling defaults to RapidOCR backend to reuse existing OCR models
 
 ### User Experience
 - **Notion-inspired design**: Clean, modern interface built with Vue 3 and DaisyUI 5 + Tailwind CSS 4
@@ -69,6 +81,9 @@ Built on the **PyWebVue** framework, SherpaNote provides a seamless desktop expe
 - **Python 3.10+**: Core application logic
 - **sherpa-onnx**: Local-first speech recognition engine (Paraformer, SenseVoice, Whisper, Qwen3-ASR, FunASR Nano, Cohere Transcribe)
 - **RapidOCR**: Local OCR engine with PP-OCRv4/v5 model support (det/rec/cls per-component configuration)
+- **markitdown**: Text-layer PDF and Office document (DOCX/PPTX/XLSX) extraction
+- **pypdfium2**: PDF-to-image rendering (BSD license)
+- **pdfplumber**: PDF text layer detection
 - **OpenAI-compatible API**: AI text processing and generation (supports OpenRouter and custom endpoints)
 - **pywebview**: Native desktop window management (via PyWebVue framework)
 - **SQLite (WAL mode)**: Local data persistence with atomic transactions
@@ -134,6 +149,10 @@ uv run build.py --with-models sherpa-onnx-paraformer-zh-small-2024-03-09
 # Build with pre-downloaded OCR models for offline use (directory mode only)
 uv run build.py --with-ocr-models
 
+# Build with bundled plugin runtime (python-build-standalone + uv, directory mode only)
+# Enables optional backends: docling, opendataloader-pdf
+uv run build.py --with-plugins
+
 # Build with CUDA GPU acceleration (NVIDIA, requires CUDA toolkit + cuDNN)
 uv run build.py --cuda
 uv run build.py --cuda --cuda-variant cuda12.cudnn9  # CUDA 12.x + cuDNN 9
@@ -185,13 +204,14 @@ sherpanote/
 │   │   │   ├── HomeView.vue          # Record list with search/filter
 │   │   │   ├── RecordView.vue        # Recording and file transcription
 │   │   │   ├── EditorView.vue        # Transcript editing + AI processing
-│   │   │   ├── OcrView.vue           # OCR image recognition (drag-drop, batch/sequential)
-│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR, OCR tabs)
+│   │   │   ├── OcrView.vue           # OCR image recognition (fullscreen drag-drop, batch/sequential)
+│   │   │   ├── SettingsView.vue      # Full settings (General, Model, AI, ASR, OCR, Document tabs)
 │   │   │   └── AudioManageView.vue   # Audio file management
 │   │   ├── composables/
 │   │   │   ├── useRecording.ts       # Audio capture, resampling, silence detection
 │   │   │   ├── useTranscript.ts      # Transcription event handling
 │   │   │   ├── useAiProcess.ts       # AI streaming and result management
+│   │   │   ├── usePlugin.ts          # Plugin install/uninstall lifecycle management
 │   │   │   └── useStorage.ts         # CRUD operations and version control
 │   │   ├── stores/
 │   │   │   └── appStore.ts           # Global state (config, models, settings)
@@ -209,6 +229,12 @@ sherpanote/
 │   ├── processing_presets.py  # AI processing template management
 │   ├── gpu_detect.py          # NVIDIA CUDA detection and verification
 │   ├── ocr.py                 # OCR engine (RapidOCR wrapper, PDF conversion)
+│   ├── document_extractor.py  # Document extraction decision tree
+│   ├── text_detector.py       # File classification + PDF text layer detection
+│   ├── adapters/              # Backend adapters (ppocr, markitdown, docling, opendata)
+│   ├── outputs/               # Unified output types (ExtractedDocument)
+│   ├── plugins/               # Plugin system
+│   │   └── runners/           # Plugin runners (docling, opendataloader)
 │   ├── whispercpp.py          # Whisper.cpp ASR backend integration
 │   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
@@ -233,6 +259,46 @@ Configuration can be modified through the **Settings** interface.
 ## Changelog
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
+
+[2026-04-30 - Plugin System & Document Engine]
+
+### New
+
+- OCR/Document settings panel with PDF mode selection, backend management, and Java environment auto-detection
+- Multi-backend document extraction system with intelligent decision tree (markitdown, PP-OCR, docling, opendataloader-pdf)
+- Plugin system with runtime isolation: bundled Python + uv subprocess execution
+- Fullscreen drag-and-drop layout for OCR page with auto PDF text layer detection
+- PyPI and HuggingFace mirror source configuration for plugin installation
+- Docling model pre-download with configurable model directory
+- Upload file format validation with user-friendly error messages
+- Engine fallback warning when configured engine is unavailable
+
+### Fixes
+
+- Fixed PDF engine switch not taking effect after change
+- Fixed plugin install/uninstall with no log output and unresponsive progress
+- Fixed custom Java path not actually taking effect
+- Fixed opendataloader-pdf producing empty output after processing
+- Fixed OCR engine selection not syncing with saved config on startup
+- Fixed engine options still showing as uninstalled after installation
+- Fixed drag-and-drop upload area not covering full screen
+- Fixed home page stuck on loading animation after packaging
+- Fixed AI processing status indicator occasionally missing in record list
+- Fixed model call failure due to whitespace in model name
+- Fixed pypdfium2 segfault when importing PDFs on macOS
+- Fixed Windows symlink privilege error during HuggingFace model download (fallback to file copy)
+- Fixed Docling model pre-download failure in packaged app due to path issues
+- Fixed data directory paths inconsistent between development and packaged environments
+- Fixed PyInstaller frozen mode resource path resolution for build-time paths
+- Fixed opendataloader-pdf Java binary not found in PATH on Windows/Linux (JAVA_HOME now set automatically)
+
+### Optimizations
+
+- Scanned PDFs automatically skip opendataloader, use OCR directly
+- Significantly improved record list loading speed
+- Auto-cleanup of opendataloader-pdf temp files after processing
+- Data directory restructured: logs, audio, export, temp, and docling models consolidated under unified `data/` directory
+- Plugin subprocess environment auto-construction with correct PYTHONPATH
 
 [2026-04-22 - OCR Fix]
 
@@ -300,6 +366,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Next-generation speech recognition toolkit
 - **[RapidOCR](https://github.com/RapidAI/RapidOCR)**: Awesome OCR multiple programing languages toolkits
+- **[markitdown](https://github.com/microsoft/markitdown)**: Convert files to Markdown
+- **[docling](https://github.com/docling-project/docling)**: Advanced document extraction with layout analysis
 - **[pywebview](https://github.com/r0x0r/pywebview)**: Cross-platform native GUI library
 - **[PyWebVue](https://github.com/nicepkg/pywebvue)**: Vue + pywebview desktop framework
 - **[Vue.js](https://vuejs.org/)**: Progressive JavaScript framework

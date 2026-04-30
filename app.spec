@@ -93,9 +93,24 @@ hiddenimports = [
     # rapidocr transitive deps
     "onnxruntime",
     "shapely",
-    "fitz",
     # rapidocr brings in cv2 (opencv-python-headless)
     "cv2",
+    # document extraction backends
+    "markitdown",
+    # markitdown dependency for file type detection
+    "magika",
+    "pdfplumber",
+    "pypdfium2",
+    "PIL",
+    # plugin subsystem
+    "py.plugins",
+    "py.plugins.paths",
+    "py.plugins.manager",
+    "py.plugins.runner",
+    "py.plugins.java_detect",
+    "py.plugins.runners",
+    "py.plugins.runners.docling_runner",
+    "py.plugins.runners.opendata_runner",
 ]
 
 
@@ -150,7 +165,47 @@ for _cfg_name in ("config.yaml", "default_models.yaml"):
         a.datas.append((str(_Path("rapidocr") / _cfg_name), str(_cfg_path), "DATA"))
 
 # cv2 data files (haarcascades, etc.) are collected automatically
-# by PyInstaller through hiddenimports — no manual collection needed.
+# by PyInstaller through hiddenimports -- no manual collection needed.
+
+# markitdown uses magika for file type detection; collect its model files and config.
+try:
+    import magika as _magika  # noqa: E402
+    _magika_pkg = _Path(_magika.__file__).parent
+    # Collect models
+    _magika_models = _magika_pkg / "models"
+    if _magika_models.exists():
+        for _f in _magika_models.rglob("*"):
+            if _f.is_file():
+                _rel = _f.relative_to(_magika_pkg)
+                a.datas.append((str(_Path("magika") / _rel), str(_f), "DATA"))
+        print(f"[DEBUG] magika models: {_magika_models}")
+    # Collect config
+    _magika_config = _magika_pkg / "config"
+    if _magika_config.exists():
+        for _f in _magika_config.rglob("*"):
+            if _f.is_file():
+                _rel = _f.relative_to(_magika_pkg)
+                a.datas.append((str(_Path("magika") / _rel), str(_f), "DATA"))
+        print(f"[DEBUG] magika config: {_magika_config}")
+except ImportError:
+    print("[DEBUG] magika not installed, skipping model collection")
+
+# Plugin system: collect bundled Python and uv if available.
+# These are downloaded by build.py --with-plugins and placed in build/plugins_support/.
+_plugins_support = project_root / "build" / "plugins_support"
+_bundled_python_dir = _plugins_support / "python"
+_bundled_uv = _plugins_support / ("uv.exe" if sys.platform == "win32" else "uv")
+if _bundled_python_dir.exists():
+    # Collect the entire bundled Python directory tree
+    # Use a.datas (not a.binaries) so files go to dist root, not _internal/
+    for _item in _bundled_python_dir.rglob("*"):
+        if _item.is_file():
+            _rel = _item.relative_to(_bundled_python_dir)
+            a.datas.append((str(_Path("python") / _rel), str(_item), "DATA"))
+    print(f"[DEBUG] Bundled Python: {_bundled_python_dir}")
+if _bundled_uv.exists():
+    a.datas.append((str(_Path(_bundled_uv.name)), str(_bundled_uv), "DATA"))
+    print(f"[DEBUG] Bundled uv: {_bundled_uv}")
 
 if sys.platform == "win32":
     a.excludes += EXCLUDES_WIN32

@@ -580,6 +580,7 @@ examples:
     uv run build.py --cuda                             CUDA GPU build (CUDA 11.8)
     uv run build.py --cuda --cuda-variant cuda12.cudnn9  CUDA 12.8 + cuDNN 9
     uv run build.py --with-ocr-models                  Bundle default OCR models (onedir)
+    uv run build.py --with-plugins                    Bundle plugin runtime (Python + uv)
     uv run build.py --android                          Android APK (macOS / Linux)
     uv run build.py --clean                            Remove build artifacts
 
@@ -609,6 +610,9 @@ configuration:
                         help="Bundle default OCR models (onedir only). "
                              "Downloads v5/mobile det, v5/mobile rec, "
                              "v5/server cls into the package.")
+    parser.add_argument("--with-plugins", action="store_true",
+                        help="Bundle plugin runtime (python-build-standalone + uv). "
+                             "Enables optional backends (docling, opendataloader-pdf).")
     args = parser.parse_args()
 
     if args.clean:
@@ -629,6 +633,10 @@ configuration:
         _error("--with-ocr-models is not compatible with --onefile mode. "
                "OCR models are too large for single-exe distribution.")
 
+    if args.with_plugins and args.onefile:
+        _error("--with-plugins is not compatible with --onefile mode. "
+               "Plugin runtime is too large for single-exe distribution.")
+
     _build_frontend()
 
     # Download models if requested.
@@ -641,6 +649,10 @@ configuration:
     ocr_model_datas: list[tuple[str, str]] = []
     if args.with_ocr_models:
         ocr_model_datas = _download_ocr_models()
+
+    # Download plugin runtime if requested.
+    if args.with_plugins:
+        _download_plugin_runtime()
 
     _build_desktop(
         onefile=args.onefile,
@@ -704,6 +716,144 @@ def _build_desktop(
         if cuda_venv_python is not None:
             _info(f"CUDA build venv kept at: {_CUDA_BUILD_VENV}")
             _info(f"(delete manually with: rmdir /s /q {_CUDA_BUILD_VENV})")
+
+
+# ========== plugin runtime bundling ==========
+
+# python-build-standalone: install_only Python for creating plugin venvs
+# Managed via `uv python install` instead of manual URL construction
+_PBS_VERSION = "3.11.11"
+
+# uv standalone binary
+_UV_VERSION = "0.6.6"
+
+
+def _download_plugin_runtime() -> None:
+    """Download python-build-standalone and uv binary for plugin venv support.
+
+    Places files in build/plugins_support/python/ and build/plugins_support/uv(.exe).
+    These are collected by app.spec during PyInstaller build.
+    """
+    import subprocess
+
+    support_dir = PROJECT_ROOT / "build" / "plugins_support"
+    support_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Download python-build-standalone via uv
+    # uv python install handles URL resolution, platform detection, and caching
+    pbs_target = support_dir / "python"
+
+    if pbs_target.exists():
+        _info("[plugins] Using existing bundled Python")
+    else:
+        _info(f"[plugins] Installing Python {_PBS_VERSION} via uv...")
+        result = subprocess.run(
+            ["uv", "python", "install", _PBS_VERSION],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            _error(f"Failed to install Python {_PBS_VERSION}: {result.stderr.strip()}")
+
+        _info(f"[plugins] Locating Python {_PBS_VERSION}...")
+        result = subprocess.run(
+            ["uv", "python", "find", _PBS_VERSION],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            _error(f"Failed to find Python {_PBS_VERSION}: {result.stderr.strip()}")
+
+        python_path = Path(result.stdout.strip())
+        # uv-managed Python directory structure:
+        # Windows: {install_root}/python.exe
+        # Linux/macOS: {install_root}/bin/python3
+        install_root = python_path.parent if sys.platform == "win32" else python_path.parent.parent
+
+        _info(f"[plugins] Copying Python from {install_root} to {pbs_target}...")
+        shutil.copytree(str(install_root), str(pbs_target))
+
+        # Verify
+        py_exe = pbs_target / ("python.exe" if sys.platform == "win32" else Path("bin") / "python3")
+        if py_exe.exists():
+            _info(f"[plugins] Bundled Python: {py_exe}")
+        else:
+            _warn(f"[plugins] Python executable not found at {py_exe}")
+
+    # 2. Download uv
+    uv_ext = ".exe" if sys.platform == "win32" else ""
+    uv_target = support_dir / f"uv{uv_ext}"
+
+    if uv_target.exists():
+        _info("[plugins] Using existing bundled uv")
+    else:
+        _info(f"[plugins] Downloading uv {_UV_VERSION}...")
+
+        if sys.platform == "win32":
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-pc-windows-msvc.zip"
+            uv_archive = support_dir / "uv.zip"
+            _download_file(uv_url, uv_archive)
+            import zipfile
+            with zipfile.ZipFile(uv_archive, "r") as zf:
+                for name in zf.namelist():
+                    if name.endswith("uv.exe"):
+                        with zf.open(name) as src, open(uv_target, "wb") as dst:
+                            dst.write(src.read())
+                        break
+            uv_archive.unlink(missing_ok=True)
+        elif sys.platform == "darwin":
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-aarch64-apple-darwin.tar.gz"
+            _download_and_extract_uv_tar(uv_url, uv_target, support_dir)
+        else:
+            uv_url = f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+            _download_and_extract_uv_tar(uv_url, uv_target, support_dir)
+
+        _info(f"[plugins] Bundled uv: {uv_target}")
+
+    # Size summary
+    total_size = 0
+    for f in support_dir.rglob("*"):
+        if f.is_file():
+            total_size += f.stat().st_size
+    _info(f"[plugins] Plugin runtime total: {total_size / (1024 * 1024):.1f} MB")
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """Download a file with progress display."""
+    import urllib.request
+
+    def _on_progress(block_num: int, block_size: int, total_size: int) -> None:
+        if total_size > 0:
+            downloaded = block_num * block_size
+            pct = min(int(100 * downloaded / total_size), 100)
+            mb = downloaded / (1024 * 1024)
+            total_mb = total_size / (1024 * 1024)
+            sys.stdout.write(f"\r  {pct}% ({mb:.0f}/{total_mb:.0f} MB)")
+            sys.stdout.flush()
+
+    try:
+        urllib.request.urlretrieve(url, dest, _on_progress)
+        print()  # newline after progress
+    except Exception as e:
+        _error(f"Download failed: {e}\n  URL: {url}")
+
+
+def _download_and_extract_uv_tar(url: str, uv_target: Path, support_dir: Path) -> None:
+    """Download and extract uv from a tar.gz archive."""
+    import tarfile
+
+    uv_archive = support_dir / "uv.tar.gz"
+    _download_file(url, uv_archive)
+
+    with tarfile.open(uv_archive, "r:gz") as tf:
+        for member in tf.getmembers():
+            if member.name.endswith("/uv") and not member.isdir():
+                # Extract just the uv binary
+                with tf.extractfile(member) as src, open(uv_target, "wb") as dst:
+                    dst.write(src.read())
+                break
+    uv_archive.unlink(missing_ok=True)
+
+    # Make executable on Unix
+    uv_target.chmod(uv_target.stat().st_mode | 0o755)
 
 
 # ========== OCR model bundling ==========

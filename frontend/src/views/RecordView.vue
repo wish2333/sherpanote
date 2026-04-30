@@ -14,7 +14,6 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useRecording } from "../composables/useRecording";
 import { useTranscript } from "../composables/useTranscript";
-import { useDragDrop } from "../composables/useDragDrop";
 import { call, onEvent, listAvailableModels, listInstalledModels } from "../bridge";
 import { useAppStore } from "../stores/appStore";
 import type { ModelEntry, InstalledModel, AsrConfig } from "../types";
@@ -271,32 +270,75 @@ async function handleDownloadAndTranscribe() {
   });
 }
 
-// File drag-and-drop in this view (counter-based to prevent flicker).
-const {
-  isDraggingOver: isDraggingFile,
-  onDragEnter,
-  onDragLeave,
-  onDragOver,
-  onDrop,
-} = useDragDrop((filePath) => {
-  handleFileSelected(filePath);
-});
+// ---- Fullscreen drag & drop (left/right split) ----
+const SUPPORTED_AUDIO_EXT = [
+  // Audio
+  ".mp3", ".wav", ".m4a", ".m4b", ".m4p", ".aac", ".flac", ".ogg", ".oga",
+  ".wma", ".opus", ".aiff", ".aif", ".ape", ".alac", ".amr", ".awb",
+  ".mid", ".midi", ".wv", ".tak", ".tta", ".dsd", ".dff", ".dsf",
+  // Video (ffmpeg can extract audio track)
+  ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v",
+  ".3gp", ".ts", ".mts", ".m2ts", ".m4s", ".vob", ".ogv",
+];
+const fsDragCounter = ref(0);
+const isDragOver = computed(() => fsDragCounter.value > 0);
+const dropSide = ref<"left" | "right">("left");
 
-// Import & Transcribe drag-and-drop zone.
-const {
-  isDraggingOver: isDraggingImport,
-  onDragEnter: onImportDragEnter,
-  onDragLeave: onImportDragLeave,
-  onDragOver: onImportDragOver,
-  onDrop: onImportDrop,
-} = useDragDrop((filePath) => {
-  startImportTranscribe(filePath);
-});
+function onWindowDragEnter(e: DragEvent) {
+  e.preventDefault();
+  fsDragCounter.value++;
+}
+
+function onWindowDragLeave(e: DragEvent) {
+  e.preventDefault();
+  fsDragCounter.value--;
+}
+
+function onWindowDragOver(e: DragEvent) {
+  e.preventDefault();
+  if (e.clientX < window.innerWidth / 2) {
+    dropSide.value = "left";
+  } else {
+    dropSide.value = "right";
+  }
+}
+
+function onWindowDrop(e: DragEvent) {
+  e.preventDefault();
+  const side = e.clientX < window.innerWidth / 2 ? "left" : "right";
+  fsDragCounter.value = 0;
+
+  setTimeout(async () => {
+    const res = await call<string[]>("get_dropped_files");
+    if (!res.success || !res.data || res.data.length === 0) return;
+
+    const filePath = res.data[0];
+    const ext = filePath.substring(filePath.lastIndexOf(".")).toLowerCase();
+    if (!SUPPORTED_AUDIO_EXT.includes(ext)) {
+      store.showToast(
+        `不支持的文件格式: ${ext}，支持的格式: ${SUPPORTED_AUDIO_EXT.join(", ")}`,
+        "error",
+      );
+      return;
+    }
+
+    if (side === "left") {
+      handleFileSelected(filePath);
+    } else {
+      startImportTranscribe(filePath);
+    }
+  }, 150);
+}
 
 // Start listening for ASR events on mount.
 onMounted(async () => {
   await Promise.all([loadModels(), loadAsrConfig()]);
   startListening();
+
+  window.addEventListener("dragenter", onWindowDragEnter as EventListener);
+  window.addEventListener("dragleave", onWindowDragLeave as EventListener);
+  window.addEventListener("dragover", onWindowDragOver as EventListener);
+  window.addEventListener("drop", onWindowDrop as EventListener);
 
   // Check for route query ?file=xxx (redirected from HomeView drag-drop).
   const fileQuery = route.query.file as string | undefined;
@@ -308,16 +350,16 @@ onMounted(async () => {
 onUnmounted(() => {
   stopListening();
   resetState();
+  window.removeEventListener("dragenter", onWindowDragEnter as EventListener);
+  window.removeEventListener("dragleave", onWindowDragLeave as EventListener);
+  window.removeEventListener("dragover", onWindowDragOver as EventListener);
+  window.removeEventListener("drop", onWindowDrop as EventListener);
 });
 </script>
 
 <template>
   <div
     class="mx-auto max-w-4xl px-4 py-6"
-    @dragenter="onDragEnter"
-    @dragleave="onDragLeave"
-    @dragover="onDragOver"
-    @drop="onDrop"
   >
     <!-- Header -->
     <div class="mb-4 flex items-center gap-3">
@@ -416,30 +458,15 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Drag overlay -->
-    <div
-      v-if="isDraggingFile"
-      class="mb-4 rounded-lg border-2 border-dashed border-primary bg-primary/5 p-6 text-center"
-    >
-      <p class="text-primary font-medium">拖放音频文件以转写</p>
-    </div>
-
     <!-- Recording controls -->
     <AudioRecorder
       @recording-complete="handleRecordingComplete"
       @file-selected="handleFileSelected"
     />
 
-    <!-- Import & Transcribe (dedicated drag-drop zone) -->
+    <!-- Import & Transcribe -->
     <div
-      class="mt-4 rounded-lg border-2 border-dashed transition-colors"
-      :class="isDraggingImport
-        ? 'border-secondary bg-secondary/10'
-        : 'border-base-300'"
-      @dragenter="onImportDragEnter"
-      @dragleave="onImportDragLeave"
-      @dragover="onImportDragOver"
-      @drop="onImportDrop"
+      class="mt-4 rounded-lg border-2 border-dashed border-base-300"
     >
       <!-- Progress bar shown during import -->
       <div v-if="isImporting" class="p-4">
@@ -448,11 +475,6 @@ onUnmounted(() => {
           <span>{{ importProgress }}%</span>
         </div>
         <progress class="progress progress-primary w-full" :value="importProgress" max="100"></progress>
-      </div>
-
-      <!-- Drag overlay text -->
-      <div v-else-if="isDraggingImport" class="p-6 text-center">
-        <p class="text-secondary font-medium">拖放音频文件以导入并转写</p>
       </div>
 
       <!-- Default idle state -->
@@ -464,7 +486,7 @@ onUnmounted(() => {
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <span>拖放音频文件到此处，或</span>
+            <span>拖放音频文件到页面任意位置，或</span>
           </div>
           <button
             v-if="!isRecording && !isTranscribingFile && !isLoadingModel"
@@ -504,14 +526,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Live transcript output -->
-    <TranscriptPanel
-      v-if="finalSegments.length > 0 || partialText"
-      :segments="finalSegments"
-      :partial-text="partialText"
-      class="mt-6"
-    />
-
     <!-- Placeholder when idle -->
     <div
       v-if="finalSegments.length === 0 && !partialText && !isRecording && !isTranscribingFile && !isImporting"
@@ -526,5 +540,65 @@ onUnmounted(() => {
       <p class="mb-1 text-lg font-medium">准备录音</p>
       <p class="text-sm">点击"开始录音"或上传音频文件开始。</p>
     </div>
+
+    <!-- Live transcript output -->
+    <TranscriptPanel
+      v-if="finalSegments.length > 0 || partialText"
+      :segments="finalSegments"
+      :partial-text="partialText"
+      class="mt-6"
+    />
   </div>
+
+  <!-- Fullscreen drag overlay (left: direct transcribe, right: import & transcribe) -->
+  <Teleport to="body">
+    <div
+      v-if="isDragOver"
+      class="pointer-events-none fixed inset-0 z-50 flex"
+    >
+      <!-- Left half: direct transcribe -->
+      <div
+        class="flex flex-1 items-center justify-center transition-colors duration-150"
+        :class="dropSide === 'left'
+          ? 'bg-primary/10 border-r-2 border-primary border-dashed'
+          : 'bg-primary/5'"
+      >
+        <div class="rounded-xl border-2 border-dashed px-12 py-8 text-center"
+          :class="dropSide === 'left'
+            ? 'border-primary bg-base-100/90'
+            : 'border-primary/30 bg-base-100/50'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-10 w-10 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+            <path d="M19 10v2a7 7 0 01-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+          <p class="text-lg font-semibold">直接转写</p>
+          <p class="text-sm opacity-60">拖放到此处直接转录音频</p>
+        </div>
+      </div>
+      <!-- Right half: import & transcribe -->
+      <div
+        class="flex flex-1 items-center justify-center transition-colors duration-150"
+        :class="dropSide === 'right'
+          ? 'bg-secondary/10 border-l-2 border-secondary border-dashed'
+          : 'bg-secondary/5'"
+      >
+        <div class="rounded-xl border-2 border-dashed px-12 py-8 text-center"
+          :class="dropSide === 'right'
+            ? 'border-secondary bg-base-100/90'
+            : 'border-secondary/30 bg-base-100/50'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-10 w-10 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <p class="text-lg font-semibold">导入并转写</p>
+          <p class="text-sm opacity-60">拖放到此处导入并转录音频</p>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

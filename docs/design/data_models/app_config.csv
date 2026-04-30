@@ -1,0 +1,3 @@
+Field Name,Type,Default,Required,Description,Validation Rules
+key,TEXT,N/A,Yes,Configuration key (unique),Unique string identifier
+value,TEXT,"",No,Configuration value as string,JSON-encoded for complex values

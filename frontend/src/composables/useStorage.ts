@@ -21,26 +21,32 @@ export function useStorage() {
   /** List records with optional filter. */
   async function loadRecords(filter?: RecordFilter): Promise<TranscriptRecord[]> {
     isLoading.value = true;
-    const res = await call<TranscriptRecord[]>("list_records", filter ?? null);
-    isLoading.value = false;
-    if (res.success && res.data) {
-      store.records = res.data;
-      return res.data;
+    try {
+      const res = await call<TranscriptRecord[]>("list_records", filter ?? null);
+      if (res.success && res.data) {
+        store.records = res.data;
+        return res.data;
+      }
+      return [];
+    } finally {
+      isLoading.value = false;
     }
-    return [];
   }
 
   /** Fetch a single record by ID. */
   async function getRecord(id: string): Promise<TranscriptRecord | null> {
     isLoading.value = true;
-    const res = await call<TranscriptRecord>("get_record", id);
-    isLoading.value = false;
-    if (res.success && res.data) {
-      store.currentRecord = res.data;
-      return res.data;
+    try {
+      const res = await call<TranscriptRecord>("get_record", id);
+      if (res.success && res.data) {
+        store.currentRecord = res.data;
+        return res.data;
+      }
+      store.showToast(res.error ?? "Failed to load record", "error");
+      return null;
+    } finally {
+      isLoading.value = false;
     }
-    store.showToast(res.error ?? "Failed to load record", "error");
-    return null;
   }
 
   /** Create or update a record. Returns the saved record. */
@@ -74,12 +80,15 @@ export function useStorage() {
   /** Search records by keyword (title + transcript). */
   async function searchRecords(keyword: string): Promise<TranscriptRecord[]> {
     isLoading.value = true;
-    const res = await call<TranscriptRecord[]>("search_records", keyword);
-    isLoading.value = false;
-    if (res.success && res.data) {
-      return res.data;
+    try {
+      const res = await call<TranscriptRecord[]>("search_records", keyword);
+      if (res.success && res.data) {
+        return res.data;
+      }
+      return [];
+    } finally {
+      isLoading.value = false;
     }
-    return [];
   }
 
   /** Get version history for a record. */

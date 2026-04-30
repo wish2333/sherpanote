@@ -7,10 +7,9 @@
  */
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
-import { onEvent, pickImageFiles, ocrProcess, cancelOcr, getImagePreview } from "../bridge";
-import { useDragDrop } from "../composables/useDragDrop";
+import { onEvent, pickImageFiles, ocrProcess, cancelOcr, getImagePreview, call, getAvailableBackends, getPluginStatus, detectPdfTextLayer } from "../bridge";
 import { useAppStore } from "../stores/appStore";
-import type { OcrFileEntry, OcrMode } from "../types";
+import type { OcrFileEntry, OcrMode, DocumentConfig, PluginConfig, PluginPackageStatus } from "../types";
 
 const router = useRouter();
 const store = useAppStore();
@@ -25,16 +24,106 @@ const previewMap = ref<Record<string, string>>({});
 
 const canProcess = computed(() => files.value.length > 0 && !isProcessing.value);
 
-// ---- Drag & Drop ----
-const {
-  isDraggingOver: isDragOver,
-  onDragEnter,
-  onDragLeave,
-  onDragOver,
-  onDrop,
-} = useDragDrop((filePath: string) => {
-  addFileEntry(filePath);
-});
+// ---- PDF text layer detection ----
+type PdfTextStatus = "text" | "scan" | "unknown";
+const pdfTextLayer = ref<Record<string, PdfTextStatus>>({});
+
+async function detectTextLayer(filePath: string) {
+  if (pdfTextLayer.value[filePath]) return;
+  pdfTextLayer.value = { ...pdfTextLayer.value, [filePath]: "unknown" as PdfTextStatus };
+  try {
+    const res = await detectPdfTextLayer(filePath);
+    if (res.success && res.data) {
+      pdfTextLayer.value = { ...pdfTextLayer.value, [filePath]: res.data.has_text ? "text" : "scan" };
+    }
+  } catch {
+    // Detection failed silently
+  }
+}
+
+// ---- Engine availability ----
+const availableBackends = ref<Record<string, boolean>>({});
+const pluginStatuses = ref<Record<string, PluginPackageStatus>>({});
+const textEngine = computed(() => (store.documentConfig as DocumentConfig).text_pdf_engine);
+const scanEngine = computed(() => (store.documentConfig as DocumentConfig).scan_pdf_engine);
+
+async function loadBackends() {
+  const [backendRes, statusRes] = await Promise.all([
+    getAvailableBackends(),
+    getPluginStatus(),
+  ]);
+  if (backendRes.success && backendRes.data) availableBackends.value = backendRes.data;
+  if (statusRes.success && statusRes.data) {
+    const map: Record<string, PluginPackageStatus> = {};
+    for (const [key, val] of Object.entries(statusRes.data)) {
+      map[key] = { name: key, installed: val.installed, version: val.version };
+    }
+    pluginStatuses.value = map;
+  }
+}
+
+const isDoclingAvail = computed(
+  () => availableBackends.value.docling === true
+     || pluginStatuses.value.docling?.installed === true,
+);
+const isOpendataAvail = computed(
+  () => availableBackends.value.opendataloader === true
+     || pluginStatuses.value.opendataloader?.installed === true,
+);
+
+// ---- Engine change handler ----
+async function setTextEngine(engine: DocumentConfig["text_pdf_engine"]) {
+  store.documentConfig = { ...store.documentConfig, text_pdf_engine: engine };
+  call("update_config", {
+    ai: store.aiConfig, asr: store.asrConfig, ocr: store.ocrConfig,
+    plugin: store.pluginConfig, document: store.documentConfig,
+    auto_ai_modes: store.autoAiModes, max_tokens_mode: "auto",
+  });
+}
+
+async function setScanEngine(engine: DocumentConfig["scan_pdf_engine"]) {
+  store.documentConfig = { ...store.documentConfig, scan_pdf_engine: engine };
+  call("update_config", {
+    ai: store.aiConfig, asr: store.asrConfig, ocr: store.ocrConfig,
+    plugin: store.pluginConfig, document: store.documentConfig,
+    auto_ai_modes: store.autoAiModes, max_tokens_mode: "auto",
+  });
+}
+
+// ---- Drag & Drop (fullscreen, multi-file) ----
+const fsDragCounter = ref(0);
+const isDragOver = computed(() => fsDragCounter.value > 0);
+
+function onWindowDragEnter(e: DragEvent) {
+  e.preventDefault();
+  fsDragCounter.value++;
+}
+
+function onWindowDragLeave(e: DragEvent) {
+  e.preventDefault();
+  fsDragCounter.value--;
+}
+
+function onWindowDragOver(e: DragEvent) {
+  e.preventDefault();
+}
+
+function onWindowDrop(e: DragEvent) {
+  e.preventDefault();
+  fsDragCounter.value = 0;
+  // Wait for pywebvue's native drop handler to capture paths
+  setTimeout(async () => {
+    const res = await call<string[]>("get_dropped_files");
+    if (res.success && res.data && res.data.length > 0) {
+      let added = 0;
+      for (const p of res.data) {
+        await addFileEntry(p);
+        added++;
+      }
+      if (added > 0) store.showToast(`已添加 ${added} 个文件`, "success");
+    }
+  }, 150);
+}
 
 // ---- File management ----
 function formatSize(sizeMb: number): string {
@@ -47,7 +136,11 @@ async function addFileEntry(p: string) {
   if (files.value.some((f) => f.path === p)) return;
   const name = p.split(/[\\/]/).pop() ?? p;
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  const type: "image" | "pdf" = ext === "pdf" ? "pdf" : "image";
+  const type: "image" | "pdf" | "office" = ext === "pdf"
+    ? "pdf"
+    : ["docx", "pptx", "xlsx"].includes(ext)
+      ? "office"
+      : "image";
   let sizeMb = 0;
   try {
     const fs = await (window as any).pywebview?.api?.get_file_size?.(p);
@@ -58,6 +151,7 @@ async function addFileEntry(p: string) {
     // ignore
   }
   files.value.push({ path: p, name, type, size_mb: sizeMb });
+  if (type === "pdf") detectTextLayer(p);
 }
 
 async function addFiles() {
@@ -133,7 +227,22 @@ function cancelProcessing() {
 let offProgress: (() => void) | null = null;
 let offComplete: (() => void) | null = null;
 
-onMounted(() => {
+onMounted(async () => {
+  window.addEventListener("dragenter", onWindowDragEnter as EventListener);
+  window.addEventListener("dragleave", onWindowDragLeave as EventListener);
+  window.addEventListener("dragover", onWindowDragOver as EventListener);
+  window.addEventListener("drop", onWindowDrop as EventListener);
+
+  // Sync store with persisted backend config
+  const configRes = await call<{
+    plugin?: PluginConfig; document?: DocumentConfig;
+  }>("get_config");
+  if (configRes.success && configRes.data) {
+    if (configRes.data.plugin) store.pluginConfig = configRes.data.plugin;
+    if (configRes.data.document) store.documentConfig = configRes.data.document;
+  }
+
+  loadBackends();
   offProgress = onEvent<{ status: string; current: number; total: number; percent: number }>(
     "ocr_progress",
     (detail) => {
@@ -144,17 +253,39 @@ onMounted(() => {
       };
     },
   );
-  offComplete = onEvent<{ status: string; records?: Array<{ id: string }>; error?: string }>(
+  offComplete = onEvent<{ status: string; records?: Array<{ id: string }>; error?: string; backend_used?: string }>(
     "ocr_complete",
     (detail) => {
       isProcessing.value = false;
       if (detail.status === "done" && detail.records && detail.records.length > 0) {
+        // Check if the engine actually used differs from the configured one
+        const dc = store.documentConfig as DocumentConfig | undefined;
+        if (dc && detail.backend_used) {
+          const configured = dc.text_pdf_engine;
+          if (configured !== "markitdown" && detail.backend_used !== configured && detail.backend_used !== "ppocr") {
+            // User selected a non-default engine but a different one was used
+            const nameMap: Record<string, string> = {
+              docling: "Docling",
+              opendataloader: "OpenDataLoader",
+              markitdown: "markitdown",
+              ppocr: "PP-OCR",
+            };
+            store.showToast(
+              `注意：所选引擎 ${nameMap[configured] ?? configured} 不可用，已使用 ${nameMap[detail.backend_used] ?? detail.backend_used}`,
+              "warning",
+            );
+          }
+        }
         store.showToast("OCR 识别完成", "success");
         router.push(`/editor/${detail.records[0].id}`);
       } else if (detail.status === "cancelled") {
         store.showToast("OCR 已取消", "info");
       } else if (detail.status === "error") {
-        store.showToast(`OCR 识别失败: ${detail.error ?? "未知错误"}`, "error");
+        const errMsg = detail.error ?? "Unknown error";
+        store.showToast(
+          `Processing failed: ${errMsg}. Try switching the default engine in Settings > OCR / Documents.`,
+          "error",
+        );
       }
     },
   );
@@ -163,52 +294,83 @@ onMounted(() => {
 onUnmounted(() => {
   offProgress?.();
   offComplete?.();
+  window.removeEventListener("dragenter", onWindowDragEnter as EventListener);
+  window.removeEventListener("dragleave", onWindowDragLeave as EventListener);
+  window.removeEventListener("dragover", onWindowDragOver as EventListener);
+  window.removeEventListener("drop", onWindowDrop as EventListener);
 });
 </script>
 
 <template>
   <div
     class="container mx-auto max-w-4xl px-4 py-6"
-    @dragenter="onDragEnter"
-    @dragleave="onDragLeave"
-    @dragover="onDragOver"
-    @drop="onDrop"
   >
+    <!-- Fullscreen drag overlay -->
+    <div
+      v-if="isDragOver"
+      class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-primary/10"
+    >
+      <div class="rounded-xl border-2 border-dashed border-primary bg-base-100/80 px-12 py-8 text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-10 w-10 text-primary mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <p class="text-lg font-semibold text-primary">松开以添加文件</p>
+        <p class="text-base-content/50 text-sm mt-1">支持 PNG, JPG, BMP, TIFF, WebP, PDF, DOCX, PPTX, XLSX</p>
+      </div>
+    </div>
+
     <h1 class="text-2xl font-bold tracking-tight text-base-content mb-6">OCR</h1>
 
-    <!-- Upload area -->
-    <div class="card bg-base-100 border border-base-300 shadow-md mb-6">
-      <div class="card-body">
-        <div
-          class="border-2 border-dashed rounded-lg p-8 text-center transition-colors"
-          :class="isDragOver ? 'border-primary bg-primary/5' : 'border-base-300 hover:border-primary'"
-        >
-          <svg class="h-10 w-10 mx-auto text-base-content/30 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-          </svg>
-          <p v-if="!isDragOver" class="text-base-content/60 text-sm">拖放图片/PDF 文件到此处，或</p>
-          <p v-else class="text-primary font-medium text-sm">松开以添加文件</p>
-          <p class="text-base-content/40 text-xs mt-1">支持 PNG, JPG, BMP, TIFF, WebP, PDF</p>
-          <button
-            class="btn btn-primary btn-sm mt-3"
-            :disabled="isProcessing"
-            @click="addFiles"
-          >
-            选择文件
-          </button>
-        </div>
+    <!-- Compact toolbar: title + add files -->
+    <div class="flex items-center gap-3 mb-6">
+      <div class="form-control flex-1">
+        <input
+          v-model="titleInput"
+          type="text"
+          placeholder="标题（可选，留空自动生成）"
+          class="input input-bordered input-sm w-full"
+        />
+      </div>
+      <button
+        class="btn btn-primary btn-sm whitespace-nowrap"
+        :disabled="isProcessing"
+        @click="addFiles"
+      >
+        <svg class="h-4 w-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
+        选择文件
+      </button>
+    </div>
 
-        <!-- Title input -->
-        <div class="form-control mt-4">
-          <label class="label">
-            <span class="label-text text-sm">标题（可选）</span>
+    <!-- PDF Engine selector -->
+    <div class="card bg-base-100 border border-base-300 shadow-md mb-6">
+      <div class="card-body py-3">
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label class="flex items-center gap-2">
+            <span class="text-sm whitespace-nowrap">文本层 PDF</span>
+            <select class="select select-bordered select-sm w-44"
+              :value="textEngine"
+              @change="setTextEngine(($event.target as HTMLSelectElement).value as DocumentConfig['text_pdf_engine'])"
+            >
+              <option value="markitdown">markitdown</option>
+              <option value="opendataloader" :disabled="!isOpendataAvail">opendataloader{{ !isOpendataAvail ? ' (未安装)' : '' }}</option>
+              <option value="docling" :disabled="!isDoclingAvail">docling{{ !isDoclingAvail ? ' (未安装)' : '' }}</option>
+              <option value="ppocr">PP-OCR</option>
+            </select>
           </label>
-          <input
-            v-model="titleInput"
-            type="text"
-            placeholder="留空则自动生成标题"
-            class="input input-bordered input-sm w-full"
-          />
+          <label class="flex items-center gap-2">
+            <span class="text-sm whitespace-nowrap">扫描 PDF</span>
+            <select class="select select-bordered select-sm w-44"
+              :value="scanEngine"
+              @change="setScanEngine(($event.target as HTMLSelectElement).value as DocumentConfig['scan_pdf_engine'])"
+            >
+              <option value="ppocr">PP-OCR</option>
+              <option value="docling" :disabled="!isDoclingAvail">docling{{ !isDoclingAvail ? ' (未安装)' : '' }}</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
@@ -270,19 +432,27 @@ onUnmounted(() => {
                 @error="delete previewMap[file.path]"
               />
               <span v-else class="text-xs text-base-content/40">
-                {{ file.type === "pdf" ? "PDF" : "IMG" }}
+                {{ file.type === "pdf" ? "PDF" : file.type === "office" ? "DOC" : "IMG" }}
               </span>
             </div>
 
             <!-- File info -->
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium truncate">{{ file.name }}</p>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <span
                   class="badge badge-xs"
-                  :class="file.type === 'pdf' ? 'badge-warning' : 'badge-info'"
+                  :class="file.type === 'pdf' ? 'badge-warning' : file.type === 'office' ? 'badge-success' : 'badge-info'"
                 >
-                  {{ file.type === "pdf" ? "PDF" : "IMG" }}
+                  {{ file.type === "pdf" ? "PDF" : file.type === "office" ? "DOC" : "IMG" }}
+                </span>
+                <span v-if="file.type === 'pdf' && pdfTextLayer[file.path]" class="badge badge-xs"
+                  :class="pdfTextLayer[file.path] === 'text' ? 'badge-success' : 'badge-error'"
+                >
+                  {{ pdfTextLayer[file.path] === "text" ? "text" : "scan" }}
+                </span>
+                <span v-if="file.type === 'pdf' && !pdfTextLayer[file.path]" class="badge badge-xs badge-ghost opacity-50">
+                  <span class="loading loading-spinner loading-xs"></span>
                 </span>
                 <span v-if="formatSize(file.size_mb)" class="text-xs text-base-content/40">
                   {{ formatSize(file.size_mb) }}

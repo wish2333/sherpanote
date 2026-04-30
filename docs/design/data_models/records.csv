@@ -1,0 +1,11 @@
+Field Name,Type,Default,Required,Description,Validation Rules
+id,TEXT,auto-generated (uuid4),Yes,Unique record identifier,UUID format, primary key
+title,TEXT,"",No,Record display title,Max 500 chars
+audio_path,TEXT,"",No,Path to audio file (relative or absolute),Valid filesystem path or empty
+transcript,TEXT,"",No,Full transcribed text content,No size limit
+segments_json,TEXT,"[]",No,Timestamped transcript segments as JSON array,Valid JSON array of {text, start, end} objects
+ai_results_json,TEXT,"{}",No,AI processing results as JSON object,Valid JSON object {mode: result_string}
+category,TEXT,"",No,Record category for filtering,Free text
+tags_json,TEXT,"[]",No,Tags as JSON array,Valid JSON array of strings
+duration_seconds,REAL,0.0,No,Audio duration in seconds,Non-negative float
+created_at,TEXT,auto-generated (ISO 8601),Yes,Creation timestamp,ISO 8601 datetime string

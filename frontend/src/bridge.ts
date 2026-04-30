@@ -49,7 +49,12 @@ export async function call<T = unknown>(
   method: string,
   ...args: unknown[]
 ): Promise<ApiResponse<T>> {
-  const api = getRawApi();
+  let api: PyWebViewApi;
+  try {
+    api = getRawApi();
+  } catch {
+    return { success: false, error: "pywebview API not available" };
+  }
   if (!(method in api)) {
     return { success: false, error: `Method '${method}' not found on bridge` };
   }
@@ -235,4 +240,40 @@ export function downloadOcrModels(
 
 export function deleteOcrModel(version: string, role: string, model_type: string) {
   return call("delete_ocr_model", version, role, model_type);
+}
+
+// ------------------------------------------------------------------ //
+//  Plugin / Document Backend API helpers                             //
+// ------------------------------------------------------------------ //
+
+export function getPluginStatus() {
+  return call<Record<string, { installed: boolean; version: string | null }>>("get_plugin_status");
+}
+
+export function installPlugin(packageName: string) {
+  return call<{ status: string }>("install_plugin", packageName);
+}
+
+export function uninstallPlugin(packageName: string) {
+  return call<{ status: string }>("uninstall_plugin", packageName);
+}
+
+export function detectJava() {
+  return call<{ found: boolean; path: string | null; version: string | null; error: string | null }>("detect_java");
+}
+
+export function getAvailableBackends() {
+  return call<Record<string, boolean>>("get_available_backends");
+}
+
+export function detectPdfTextLayer(filePath: string) {
+  return call<{ has_text: boolean }>("detect_pdf_text_layer", filePath);
+}
+
+export function destroyPluginVenv() {
+  return call<{ message?: string }>("destroy_plugin_venv");
+}
+
+export function preDownloadDocling() {
+  return call<{ status: string }>("pre_download_docling");
 }

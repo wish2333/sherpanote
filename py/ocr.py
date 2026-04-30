@@ -52,16 +52,38 @@ def get_model_root_dir() -> Path:
     """Return the directory where RapidOCR stores downloaded models.
 
     Dev: rapidocr/models/ inside the installed package.
-    Packaged (PyInstaller): {exe_dir}/_internal/rapidocr/models/ (onedir)
-                             or {exe_dir}/rapidocr/models/ (if bundled at root)
+    Packaged (PyInstaller):
+      - Windows onedir: {exe_dir}/_internal/rapidocr/models/
+      - macOS .app: {exe_dir}/../Resources/rapidocr/models/
+      - Linux onedir: {exe_dir}/_internal/rapidocr/models/
     """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
-        # PyInstaller onedir: data files go into _internal/
+
+        # Check for macOS .app bundle structure
+        if exe_dir.name == "MacOS" and (exe_dir.parent / "Resources").exists():
+            # Running inside .app bundle
+            resources_dir = exe_dir.parent / "Resources"
+            rapidocr_models = resources_dir / "rapidocr" / "models"
+            if rapidocr_models.exists():
+                return rapidocr_models
+            # Return expected path even if doesn't exist yet
+            return rapidocr_models
+
+        # Windows/Linux onedir structure
         internal_dir = exe_dir / "_internal"
-        if internal_dir.exists():
+        if (internal_dir / "rapidocr" / "models").exists():
+            return internal_dir / "rapidocr" / "models"
+
+        # Fallback: try direct rapidocr/models
+        if (exe_dir / "rapidocr" / "models").exists():
+            return exe_dir / "rapidocr" / "models"
+
+        # Last resort: check both locations
+        if (internal_dir / "rapidocr" / "models").is_dir():
             return internal_dir / "rapidocr" / "models"
         return exe_dir / "rapidocr" / "models"
+
     from rapidocr.main import root_dir as _rapidocr_root
     return _rapidocr_root / "models"
 
@@ -293,38 +315,47 @@ class OcrEngine:
     ) -> list[str]:
         """Convert each page of a PDF to a PNG image.
 
-        Uses PyMuPDF (fitz) for rendering. If output_dir is not provided,
+        Uses pypdfium2 for rendering. If output_dir is not provided,
         a temporary directory is created.
 
         Returns a list of paths to the generated PNG images.
         """
-        import fitz  # PyMuPDF
+        import pypdfium2 as pdfium
+        from PIL import Image
 
-        doc = fitz.open(pdf_path)
-        page_count = len(doc)
-        logger.info("Converting PDF to images: %d pages, dpi=%d", page_count, dpi)
+        doc = pdfium.PdfDocument(pdf_path)
+        try:
+            page_count = len(doc)
+            logger.info("Converting PDF to images: %d pages, dpi=%d", page_count, dpi)
 
-        if output_dir is None:
-            tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
-            output_dir = tmp
+            if output_dir is None:
+                tmp = tempfile.mkdtemp(prefix="sherpanote_ocr_")
+                output_dir = tmp
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        image_paths: list[str] = []
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            scale = dpi / 72  # PDFium renders at 72 dpi base
+            image_paths: list[str] = []
 
-        for page_idx in range(page_count):
-            page = doc[page_idx]
-            pix = page.get_pixmap(dpi=dpi)
-            img_path = str(Path(output_dir) / f"page_{page_idx + 1:04d}.png")
-            pix.save(img_path)
-            image_paths.append(img_path)
+            for page_idx in range(page_count):
+                page = doc[page_idx]
+                try:
+                    bitmap = page.render(scale=scale)
+                    pil_image = bitmap.to_pil()
+                finally:
+                    # Explicitly close page to avoid double-free in PdfDocument finalizer
+                    page.close()
+                img_path = str(Path(output_dir) / f"page_{page_idx + 1:04d}.png")
+                pil_image.save(img_path, "PNG")
+                image_paths.append(img_path)
+        finally:
+            doc.close()
 
-        doc.close()
         logger.info("PDF converted: %d images generated in %s", len(image_paths), output_dir)
         return image_paths
 
     @staticmethod
     def supported_image_extensions() -> tuple[str, ...]:
-        """Return supported image file extensions for file picker."""
+        """Return supported file extensions for file picker."""
         return (
             "PNG Image (*.png)",
             "JPEG Image (*.jpg;*.jpeg)",
@@ -332,6 +363,9 @@ class OcrEngine:
             "TIFF Image (*.tiff;*.tif)",
             "WebP Image (*.webp)",
             "PDF Document (*.pdf)",
+            "Word Document (*.docx)",
+            "PowerPoint (*.pptx)",
+            "Excel Workbook (*.xlsx)",
             "All Files (*.*)",
         )
 
