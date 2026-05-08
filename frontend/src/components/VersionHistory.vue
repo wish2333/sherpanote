@@ -35,8 +35,11 @@ const sortedVersions = computed(() =>
 
 async function loadVersions() {
   isLoading.value = true;
-  versions.value = await getVersions(props.recordId);
-  isLoading.value = false;
+  try {
+    versions.value = await getVersions(props.recordId);
+  } finally {
+    isLoading.value = false;
+  }
 }
 
 async function handleRestore(version: number) {

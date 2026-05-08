@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
 import webview
 
 from pywebvue.bridge import Bridge
+
+logger = logging.getLogger(__name__)
+
+# Timer intervals (ms) for frontend polling bridges.
+_EVENT_FLUSH_INTERVAL_MS = 50
+_TASK_EXECUTOR_INTERVAL_MS = 100
 
 
 def _resolve_frontend_path(frontend_dir: str) -> Path:
@@ -124,18 +131,17 @@ class App:
                 "setInterval(function() {"
                 "  try { window.pywebview.api.flush_events(); }"
                 "  catch(e) { console.error('flush_events error:', e); }"
-                "}, 50);"
+                "}, " + str(_EVENT_FLUSH_INTERVAL_MS) + ");"
             )
 
             # Also start task executor that runs functions on the main thread
             # (required for thread-unsafe C++ extensions like ONNX Runtime).
-            # Run less frequently (100ms) to reduce log spam.
             window.evaluate_js(
                 "setInterval(function() {"
                 "  try { window.pywebview.api.execute_task(); }"
                 "  catch(e) { console.error('execute_task exception:', e); }"
-                "}, 100);"
+                "}, " + str(_TASK_EXECUTOR_INTERVAL_MS) + ");"
             )
-            print("DEBUG: Task executor timers started")  # This goes to server console
+            logger.debug("Task executor timers started")
 
         window.events.loaded += on_loaded

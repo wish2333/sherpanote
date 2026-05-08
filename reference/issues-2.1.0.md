@@ -1646,3 +1646,15 @@ feat(plugins): 添加插件运行时系统和多后端文档提取功能
 - 数据目录重构：日志、音频、导出、临时文件和 Docling 模型统一归入 `data/` 目录
 - 插件子进程环境自动构建，确保 PYTHONPATH 正确
 ```
+
+# 打包后问题
+
+- 打包后的软件，打开软件时记录页显示空白，切换页面再切回来才正确显示
+
+  - 根因：call() 函数没有等待 pywebview 桥接就绪。
+
+    bridge.ts 中 call() 函数（第36-49行）直接调用 getRawApi()，如果 window.pywebview.api 还未注入，就立即返回 { success:false, error: "pywebview API not available" }。而 HomeView.vue 的 onMounted 调用 loadRecords() → call("list_records")时，pywebview 桥接可能尚未就绪（打包应用中初始化需要时间），导致返回空数组，页面显示"暂无记录"空白状态。切换页面再切回时，桥接已就绪，所以能正常显示。waitForPyWebView() 函数已存在但 call() 没有使用它。
+
+    修复方案：在 call() 中先等待桥接就绪。
+
+  - 在 call() 函数开头添加 await waitForPyWebView()，确保桥接就绪后再发起调用。所有使用 call()的页面（记录页、录制页、设置页等）都会自动受益。

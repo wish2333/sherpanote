@@ -66,19 +66,19 @@ class DocumentExtractor:
         self._docling_adapter = None
         self._opendata_adapter = None
 
-    def _get_ppocr_adapter(self):
+    def _get_ppocr_adapter(self) -> "PpocrAdapter":
         from py.adapters.ppocr_adapter import PpocrAdapter
         if self._ppocr_adapter is None:
             self._ppocr_adapter = PpocrAdapter(self._ocr_engine)
         return self._ppocr_adapter
 
-    def _get_markitdown_adapter(self):
+    def _get_markitdown_adapter(self) -> "MarkitdownAdapter":
         from py.adapters.markitdown_adapter import MarkitdownAdapter
         if self._markitdown_adapter is None:
             self._markitdown_adapter = MarkitdownAdapter()
         return self._markitdown_adapter
 
-    def _get_docling_adapter(self):
+    def _get_docling_adapter(self) -> "DoclingAdapter | None":
         from py.adapters.docling_adapter import DoclingAdapter
         from py.plugins.paths import _get_base_dir
         if self._docling_adapter is None and self._plugin_manager is not None:
@@ -91,7 +91,7 @@ class DocumentExtractor:
             )
         return self._docling_adapter
 
-    def _get_opendata_adapter(self):
+    def _get_opendata_adapter(self) -> "OpendataAdapter | None":
         from py.adapters.opendata_adapter import OpendataAdapter
         if self._opendata_adapter is None and self._plugin_manager is not None:
             java_path = self._plugin_config.manual_java_path if self._plugin_config else None

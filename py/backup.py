@@ -343,10 +343,13 @@ def import_backup(zip_path: str) -> dict[str, Any]:
 
             # --- Audio files ---
             audio_count = 0
+            resolved_audio_dir = audio_dir.resolve()
             for info in zf.infolist():
                 if info.filename.startswith("audio/") and not info.is_dir():
                     filename = info.filename[len("audio/"):]
-                    dest = audio_dir / filename
+                    dest = (audio_dir / filename).resolve()
+                    if not str(dest).startswith(str(resolved_audio_dir)):
+                        raise ValueError(f"Path traversal detected in backup: {info.filename}")
                     # Extract audio file
                     with zf.open(info) as src, open(dest, "wb") as dst:
                         shutil.copyfileobj(src, dst)

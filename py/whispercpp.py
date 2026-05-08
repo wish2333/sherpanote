@@ -18,6 +18,9 @@ from py.io import convert_to_mono_16k_wav
 
 logger = logging.getLogger(__name__)
 
+# Maximum time (seconds) allowed for a whisper.cpp subprocess to complete.
+_WHISPER_SUBPROCESS_TIMEOUT = 3600  # 1 hour
+
 # SRT timestamp pattern: [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
 _SRT_PATTERN = re.compile(
     r"\[(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})\]\s*(.+)",
@@ -119,7 +122,7 @@ class WhisperCppASR:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3600,  # 1 hour max
+                timeout=_WHISPER_SUBPROCESS_TIMEOUT,
                 encoding="utf-8",
                 errors="replace",
                 cwd=str(self._binary.parent),

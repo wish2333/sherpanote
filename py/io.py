@@ -137,7 +137,7 @@ def _read_with_audioread(path: str) -> tuple[np.ndarray, int]:
         raw = raw.reshape(-1)
 
     # Convert int16 to float32 [-1, 1].
-    data = raw.astype(np.float32) / 32767.0
+    data = raw.astype(np.float32) / np.iinfo(np.int16).max
 
     # Resample to 16kHz if needed.
     if sr != 16000:

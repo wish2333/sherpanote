@@ -18,6 +18,9 @@ import yt_dlp
 
 logger = logging.getLogger(__name__)
 
+# Default audio bitrate (kbps) for extracted MP3.
+_DEFAULT_AUDIO_QUALITY = "192"
+
 
 @dataclass(frozen=True)
 class VideoDownloadConfig:
@@ -126,7 +129,7 @@ def download_audio(url: str, config: VideoDownloadConfig, on_progress: Callable[
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",
+                "preferredquality": _DEFAULT_AUDIO_QUALITY,
             }
         ],
         "quiet": True,

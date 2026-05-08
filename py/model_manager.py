@@ -23,17 +23,22 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from py.model_registry import ModelEntry, get_model, get_download_url
+from py.model_registry import (
+    ModelEntry,
+    get_model,
+    get_download_url,
+    HUGGINGFACE_BASE_URL,
+    HF_MIRROR_BASE_URL,
+)
+from py.file_matcher import find_file as _find_file, classify_model_dir as _classify_model_dir
 
 logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 65536  # 64 KB
+_env_lock = threading.Lock()  # Guards os.environ modifications in download_from_huggingface
 
 
-# ------------------------------------------------------------------ #
-#  Proxy helper                                                        #
-# ------------------------------------------------------------------ #
-
+# -- Proxy helper ---
 
 def _build_opener(proxy_mode: str, proxy_url: str | None) -> urllib.request.OpenerDirector:
     """Build a urllib opener based on proxy settings.
@@ -52,10 +57,7 @@ def _build_opener(proxy_mode: str, proxy_url: str | None) -> urllib.request.Open
     return urllib.request.build_opener()
 
 
-# ------------------------------------------------------------------ #
-#  Download (HTTP)                                                     #
-# ------------------------------------------------------------------ #
-
+# -- Download (HTTP) ---
 
 def download_archive(
     url: str,
@@ -181,52 +183,54 @@ def download_from_huggingface(
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Set proxy via environment for huggingface_hub.
-    old_http_proxy = os.environ.get("HTTP_PROXY")
-    old_https_proxy = os.environ.get("HTTPS_PROXY")
-    old_no_proxy = os.environ.get("NO_PROXY")
-    old_hf_transfer = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
-    old_download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT")
-    old_etag_timeout = os.environ.get("HF_HUB_ETAG_TIMEOUT")
-    if proxy_url:
-        os.environ["HTTP_PROXY"] = proxy_url
-        os.environ["HTTPS_PROXY"] = proxy_url
-    # Disable hf_transfer to avoid XET redirect path that may be unreachable.
-    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
-    # Increase timeouts for large files / slow mirrors (defaults are 10s).
-    os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
-    os.environ["HF_HUB_ETAG_TIMEOUT"] = "30"
-
-    try:
-        cached_path = hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            endpoint=endpoint,
-            local_dir=None,
-        )
-        shutil.copy2(cached_path, dest_path)
-    finally:
-        # Restore proxy env vars.
+    # Guard with a lock since os.environ is process-global and not thread-safe.
+    with _env_lock:
+        old_http_proxy = os.environ.get("HTTP_PROXY")
+        old_https_proxy = os.environ.get("HTTPS_PROXY")
+        old_no_proxy = os.environ.get("NO_PROXY")
+        old_hf_transfer = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
+        old_download_timeout = os.environ.get("HF_HUB_DOWNLOAD_TIMEOUT")
+        old_etag_timeout = os.environ.get("HF_HUB_ETAG_TIMEOUT")
         if proxy_url:
-            if old_http_proxy is not None:
-                os.environ["HTTP_PROXY"] = old_http_proxy
+            os.environ["HTTP_PROXY"] = proxy_url
+            os.environ["HTTPS_PROXY"] = proxy_url
+        # Disable hf_transfer to avoid XET redirect path that may be unreachable.
+        os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+        # Increase timeouts for large files / slow mirrors (defaults are 10s).
+        os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
+        os.environ["HF_HUB_ETAG_TIMEOUT"] = "30"
+
+        try:
+            cached_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                endpoint=endpoint,
+                local_dir=None,
+            )
+            shutil.copy2(cached_path, dest_path)
+        finally:
+            # Restore proxy env vars.
+            if proxy_url:
+                if old_http_proxy is not None:
+                    os.environ["HTTP_PROXY"] = old_http_proxy
+                else:
+                    os.environ.pop("HTTP_PROXY", None)
+                if old_https_proxy is not None:
+                    os.environ["HTTPS_PROXY"] = old_https_proxy
+                else:
+                    os.environ.pop("HTTPS_PROXY", None)
+            if old_hf_transfer is not None:
+                os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = old_hf_transfer
             else:
-                os.environ.pop("HTTP_PROXY", None)
-            if old_https_proxy is not None:
-                os.environ["HTTPS_PROXY"] = old_https_proxy
+                os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+            if old_download_timeout is not None:
+                os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = old_download_timeout
             else:
-                os.environ.pop("HTTPS_PROXY", None)
-        if old_hf_transfer is not None:
-            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = old_hf_transfer
-        else:
-            os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
-        if old_download_timeout is not None:
-            os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = old_download_timeout
-        else:
-            os.environ.pop("HF_HUB_DOWNLOAD_TIMEOUT", None)
-        if old_etag_timeout is not None:
-            os.environ["HF_HUB_ETAG_TIMEOUT"] = old_etag_timeout
-        else:
-            os.environ.pop("HF_HUB_ETAG_TIMEOUT", None)
+                os.environ.pop("HF_HUB_DOWNLOAD_TIMEOUT", None)
+            if old_etag_timeout is not None:
+                os.environ["HF_HUB_ETAG_TIMEOUT"] = old_etag_timeout
+            else:
+                os.environ.pop("HF_HUB_ETAG_TIMEOUT", None)
 
     return dest_path
 
@@ -252,9 +256,9 @@ def download_model(
     """
     if source in ("huggingface", "hf_mirror"):
         endpoint = (
-            "https://hf-mirror.com"
+            HF_MIRROR_BASE_URL
             if source == "hf_mirror"
-            else "https://huggingface.co"
+            else HUGGINGFACE_BASE_URL
         )
         return download_from_huggingface(
             model, endpoint, dest_path,
@@ -417,75 +421,6 @@ def validate_model(model_id: str, models_dir: Path) -> dict[str, Any]:
     return {"valid": True}
 
 
-def _find_file(model_dir: Path, *candidates: str) -> Path | None:
-    """Find the first matching file in model_dir (recursive).
-
-    Each candidate is tried as:
-    1. Exact filename
-    2. Prefixed variant (e.g. "distil-large-v3.5-tokens.txt" matches "tokens.txt")
-    3. Quantized variant (e.g. "encoder.int8.onnx" matches "encoder.onnx")
-    4. Prefixed + quantized (e.g. "distil-large-v3.5-encoder.int8.onnx" matches "encoder.onnx")
-
-    Searches model_dir and one level of subdirectories.
-    """
-    search_dirs = [model_dir]
-    for sub in model_dir.iterdir():
-        if sub.is_dir() and not sub.name.startswith("."):
-            search_dirs.append(sub)
-    for search_dir in search_dirs:
-        for name in candidates:
-            exact = search_dir / name
-            if exact.exists():
-                return exact
-            for f in search_dir.iterdir():
-                if f.is_file() and f.name != name and _match_model_file(f.name, name):
-                    return f
-    return None
-
-
-def _match_model_file(actual_name: str, candidate: str) -> bool:
-    """Check if actual_name matches candidate for model file lookup.
-
-    Handles prefixed variants and quantization suffixes.
-    See SherpaASR._match_model_file for detailed rules.
-    """
-    _QUANT = ('int8', 'int4', 'fp16', 'fp32')
-
-    cand_parts = candidate.split('.')
-    if len(cand_parts) < 2:
-        return False
-    cand_ext = cand_parts[-1]
-    if len(cand_parts) == 2:
-        cand_core, cand_quant = cand_parts[0], None
-    elif len(cand_parts) == 3 and cand_parts[1] in _QUANT:
-        cand_core, cand_quant = cand_parts[0], cand_parts[1]
-    else:
-        return actual_name.endswith(candidate)
-
-    act_parts = actual_name.split('.')
-    if len(act_parts) < 2 or act_parts[-1] != cand_ext:
-        return False
-    act_rest = act_parts[:-1]  # Everything before extension
-    if len(act_rest) >= 2 and act_rest[-1] in _QUANT:
-        act_quant = act_rest[-1]
-        act_core = '.'.join(act_rest[:-1])
-    else:
-        act_core = '.'.join(act_rest)
-        act_quant = None
-
-    if cand_quant is not None and act_quant != cand_quant:
-        return False
-    # Match both suffix patterns (e.g. "encoder-epoch-99-avg-1")
-    # and prefix patterns (e.g. "distil-large-v3.5-encoder").
-    return (
-        act_core == cand_core
-        or act_core.startswith(cand_core + "-")
-        or act_core.startswith(cand_core + "_")
-        or act_core.endswith("-" + cand_core)
-        or act_core.endswith("_" + cand_core)
-    )
-
-
 # ------------------------------------------------------------------ #
 #  List / Delete installed models                                      #
 # ------------------------------------------------------------------ #
@@ -532,8 +467,7 @@ def list_installed_models(models_dir: Path) -> list[dict[str, Any]]:
             if known:
                 model_type = known.model_type
             else:
-                from py.asr import SherpaASR
-                model_type = SherpaASR._classify_model_dir(entry) or "unknown"
+                model_type = _classify_model_dir(entry) or "unknown"
             result.append({
                 "model_id": model_id,
                 "valid": validation["valid"],
@@ -656,8 +590,8 @@ class ModelInstaller:
         model_dir.mkdir(parents=True, exist_ok=True)
 
         endpoint = (
-            "https://hf-mirror.com" if self._download_source == "hf_mirror"
-            else "https://huggingface.co"
+            HF_MIRROR_BASE_URL if self._download_source == "hf_mirror"
+            else HUGGINGFACE_BASE_URL
         )
         repo_id = entry.hf_repo_id or f"csukuangfj/{model_id}"
 

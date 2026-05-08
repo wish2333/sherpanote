@@ -27,6 +27,14 @@ from typing import Any, Callable
 import numpy as np
 
 from py.config import AsrConfig
+from py.file_matcher import (
+    classify_model_dir as _classify_model_dir,
+)
+from py.asr_recognizer import (
+    create_online_recognizer as _create_online_recognizer_impl,
+    create_offline_recognizer as _create_offline_recognizer_impl,
+    create_vad as _create_vad_impl,
+)
 from py.io import read_audio_as_mono_16k, base64_to_float32, float32_to_int16, _resample, PcmRecorder
 
 logger = logging.getLogger(__name__)
@@ -67,180 +75,7 @@ class SherpaASR:
     def is_streaming(self) -> bool:
         return self._is_streaming
 
-    @staticmethod
-    def _is_simulated_streaming_model(model_dir: Path) -> bool:
-        """Check if a model supports simulated streaming (VAD + offline recognition).
-
-        SenseVoice and Qwen3-ASR models are offline-only but can be used for
-        near-real-time speech recognition by combining VAD with the offline recognizer.
-        """
-        dir_name = model_dir.name.lower()
-        if "sense-voice" in dir_name or "sensevoice" in dir_name:
-            return True
-        if "qwen3-asr" in dir_name or "qwen3_asr" in dir_name:
-            return True
-        # Fallback: detect by characteristic file.
-        if (model_dir / "conv_frontend.onnx").exists():
-            return True
-        return False
-
-    @staticmethod
-    def _is_sense_voice_dir(model_dir: Path) -> bool:
-        """Check if a model directory is a SenseVoice model (used for offline detection)."""
-        dir_name = model_dir.name.lower()
-        return "sense-voice" in dir_name or "sensevoice" in dir_name
-
-    # ---- Model file helpers ----
-
-    @staticmethod
-    def _find_file(model_dir: Path, *candidates: str) -> Path | None:
-        """Find the first matching model file in model_dir (recursive).
-
-        Each candidate is tried as:
-        1. Exact filename
-        2. Prefixed variant (e.g. "distil-large-v3.5-tokens.txt" matches "tokens.txt")
-        3. Quantized variant (e.g. "encoder.int8.onnx" matches "encoder.onnx")
-        4. Prefixed + quantized (e.g. "distil-large-v3.5-encoder.int8.onnx" matches "encoder.onnx")
-
-        Searches model_dir and one level of subdirectories.
-        """
-        search_dirs = [model_dir]
-        for sub in model_dir.iterdir():
-            if sub.is_dir() and not sub.name.startswith("."):
-                search_dirs.append(sub)
-
-        for search_dir in search_dirs:
-            for name in candidates:
-                exact = search_dir / name
-                if exact.exists():
-                    return exact
-                for f in search_dir.iterdir():
-                    if f.is_file() and f.name != name and SherpaASR._match_model_file(f.name, name):
-                        return f
-        return None
-
-    @staticmethod
-    def _match_model_file(actual_name: str, candidate: str) -> bool:
-        """Check if actual_name matches candidate for model file lookup.
-
-        Handles prefixed variants (e.g. "distil-large-v3.5-tokens.txt")
-        and quantization suffixes (e.g. "encoder.int8.onnx" vs "encoder.onnx").
-
-        Matching rules:
-        - Extensions must match (e.g. .onnx, .txt)
-        - If candidate specifies quantization (e.g. encoder.int8.onnx),
-          actual must have the same quantization
-        - Core name must appear at end of actual core name (allows prefix)
-        """
-        _QUANT = ('int8', 'int4', 'fp16', 'fp32')
-
-        cand_parts = candidate.split('.')
-        if len(cand_parts) < 2:
-            return False
-        cand_ext = cand_parts[-1]
-        if len(cand_parts) == 2:
-            cand_core, cand_quant = cand_parts[0], None
-        elif len(cand_parts) == 3 and cand_parts[1] in _QUANT:
-            cand_core, cand_quant = cand_parts[0], cand_parts[1]
-        else:
-            return actual_name.endswith(candidate)
-
-        act_parts = actual_name.split('.')
-        if len(act_parts) < 2 or act_parts[-1] != cand_ext:
-            return False
-        act_rest = act_parts[:-1]  # Everything before extension
-        if len(act_rest) >= 2 and act_rest[-1] in _QUANT:
-            act_quant = act_rest[-1]
-            act_core = '.'.join(act_rest[:-1])
-        else:
-            act_core = '.'.join(act_rest)
-            act_quant = None
-
-        if cand_quant is not None and act_quant != cand_quant:
-            return False
-        # Match both suffix patterns (e.g. "encoder-epoch-99-avg-1")
-        # and prefix patterns (e.g. "distil-large-v3.5-encoder").
-        return (
-            act_core == cand_core
-            or act_core.startswith(cand_core + "-")
-            or act_core.startswith(cand_core + "_")
-            or act_core.endswith("-" + cand_core)
-            or act_core.endswith("_" + cand_core)
-        )
-
-    @staticmethod
-    def _find_tokenizer_dir(model_dir: Path) -> Path | None:
-        """Find a tokenizer directory (containing vocab.json) in model_dir.
-
-        Searches model_dir and one level of subdirectories.
-        Used by Qwen3-ASR and FunASR Nano models.
-        """
-        # Check model_dir itself.
-        if (model_dir / "vocab.json").exists():
-            return model_dir
-        # Check subdirectories.
-        for sub in model_dir.iterdir():
-            if sub.is_dir() and not sub.name.startswith(".") and (sub / "vocab.json").exists():
-                return sub
-        return None
-
-    @staticmethod
-    def _has_model_files(model_dir: Path) -> bool:
-        """Check if a directory looks like it contains a sherpa-onnx model.
-
-        Searches model_dir and one level of subdirectories.
-        """
-        if SherpaASR._find_file(model_dir, "tokens.txt"):
-            return True
-        # Check for any .onnx file in model_dir or subdirs.
-        if any((model_dir / f).is_file() and f.endswith(".onnx")
-               for f in model_dir.iterdir() if f.is_file()):
-            return True
-        for sub in model_dir.iterdir():
-            if sub.is_dir():
-                if any((sub / f).is_file() and f.endswith(".onnx")
-                       for f in sub.iterdir() if f.is_file()):
-                    return True
-        return False
-
-    @staticmethod
-    def _classify_model_dir(model_dir: Path) -> str | None:
-        """Classify a model directory as 'streaming', 'offline', or None.
-
-        Uses file presence heuristics:
-        - joiner.onnx present -> Transducer/Zipformer (always streaming)
-        - model.onnx present -> Offline (Paraformer/SenseVoice)
-        - conv_frontend.onnx present -> Offline (Qwen3-ASR)
-        - encoder_adaptor.onnx or llm.onnx -> Offline (FunASR Nano)
-        - encoder + decoder only (no joiner, no model) -> Ambiguous:
-          dir name with "whisper" -> offline
-          dir name with "streaming"/"online"/"zipformer" -> streaming
-          default -> offline
-        """
-        has_joiner = SherpaASR._find_file(model_dir, "joiner.onnx") is not None
-        has_model = SherpaASR._find_file(model_dir, "model.onnx", "model.int8.onnx") is not None
-        has_encoder = SherpaASR._find_file(model_dir, "encoder.onnx", "encoder.int8.onnx") is not None
-        has_decoder = SherpaASR._find_file(model_dir, "decoder.onnx", "decoder.int8.onnx") is not None
-        has_conv_frontend = SherpaASR._find_file(model_dir, "conv_frontend.onnx") is not None
-        has_encoder_adaptor = SherpaASR._find_file(model_dir, "encoder_adaptor.onnx", "encoder_adaptor.int8.onnx") is not None
-        has_llm = SherpaASR._find_file(model_dir, "llm.onnx", "llm.int8.onnx") is not None
-
-        if has_joiner:
-            return "streaming"
-        if has_model:
-            return "offline"
-        if has_conv_frontend:
-            return "offline"
-        if has_encoder_adaptor or has_llm:
-            return "offline"
-        if has_encoder and has_decoder:
-            dir_name = model_dir.name.lower()
-            if "whisper" in dir_name:
-                return "offline"
-            if any(kw in dir_name for kw in ("streaming", "online", "zipformer")):
-                return "streaming"
-            return "offline"
-        return None
+    # ---- Model detection helpers are in py.file_matcher ----
 
     # ---- Model paths ----
 
@@ -297,7 +132,7 @@ class SherpaASR:
         base = self._model_dir()
         if base.is_dir():
             for entry in sorted(base.iterdir()):
-                if entry.is_dir() and SherpaASR._classify_model_dir(entry) == "streaming":
+                if entry.is_dir() and _classify_model_dir(entry) == "streaming":
                     return entry
 
         return None
@@ -328,7 +163,7 @@ class SherpaASR:
         base = self._model_dir()
         if base.is_dir():
             for entry in sorted(base.iterdir()):
-                if entry.is_dir() and SherpaASR._classify_model_dir(entry) == "offline":
+                if entry.is_dir() and _classify_model_dir(entry) == "offline":
                     return entry
 
         return None
@@ -380,91 +215,12 @@ class SherpaASR:
         return {"status": "streaming", "language": self._config.language}
 
     def _create_online_recognizer(self, sherpa_onnx: Any, model_dir: Path) -> Any:
-        """Create an OnlineRecognizer from the model directory.
-
-        Detects model type (paraformer vs zipformer) based on
-        which files are present. Supports prefixed filenames
-        (e.g. distil-large-v3.5-encoder.int8.onnx).
-        """
-        import sys
-        import traceback
-
-        logger.info("_create_online_recognizer called with model_dir: %s", model_dir)
-        logger.info("Python version: %s", sys.version)
-        logger.info("Platform: %s", sys.platform)
-
-        # Determine model type: check for joiner.onnx first (Zipformer/Transducer)
-        # to avoid misclassifying Zipformer models as Paraformer.
-        joiner = self._find_file(model_dir, "joiner.onnx")
-
-        tokens = self._find_file(model_dir, "tokens.txt")
-        if not tokens:
-            raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
-
-        num_threads = 2
-        provider = "cpu"
-        if self._config.use_gpu:
-            # sherpa-onnx uses "cuda" for GPU inference.
-            provider = "cuda"
-
-        try:
-            if joiner and joiner.exists():
-                # Transducer (zipformer) streaming model.
-                encoder = self._find_file(model_dir, "encoder.onnx")
-                decoder = self._find_file(model_dir, "decoder.onnx")
-                if not all(f and f.exists() for f in (encoder, decoder)):
-                    raise FileNotFoundError(
-                        f"Model files not found in {model_dir}. "
-                        "Expected encoder.onnx, decoder.onnx, joiner.onnx"
-                    )
-                logger.info("Using streaming Zipformer (transducer) model")
-                recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
-                    tokens=str(tokens),
-                    encoder=str(encoder),
-                    decoder=str(decoder),
-                    joiner=str(joiner),
-                    num_threads=num_threads,
-                    sample_rate=self._config.sample_rate,
-                    feature_dim=80,
-                    enable_endpoint_detection=True,
-                    rule1_min_trailing_silence=2.4,
-                    rule2_min_trailing_silence=1.0,
-                    rule3_min_utterance_length=20.0,
-                    provider=provider,
-                )
-                logger.info("OnlineRecognizer created successfully (Zipformer)")
-                return recognizer
-            else:
-                # Paraformer streaming model (no joiner.onnx).
-                paraformer_encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
-                if not paraformer_encoder or not paraformer_encoder.exists():
-                    raise FileNotFoundError(
-                        f"Model files not found in {model_dir}. "
-                        "Expected encoder.onnx and decoder.onnx"
-                    )
-                decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
-                logger.info("Using streaming Paraformer model")
-                logger.info("Creating OnlineRecognizer.from_paraformer with:")
-                logger.info("  tokens: %s", tokens)
-                logger.info("  encoder: %s", paraformer_encoder)
-                logger.info("  decoder: %s", decoder)
-                logger.info("  provider: %s", provider)
-
-                recognizer = sherpa_onnx.OnlineRecognizer.from_paraformer(
-                    tokens=str(tokens),
-                    encoder=str(paraformer_encoder),
-                    decoder=str(decoder),
-                    num_threads=num_threads,
-                    sample_rate=self._config.sample_rate,
-                    feature_dim=80,
-                    provider=provider,
-                )
-                logger.info("OnlineRecognizer created successfully (Paraformer)")
-                return recognizer
-        except Exception as e:
-            logger.error("Failed to create online recognizer: %s", e)
-            logger.debug("Traceback: %s", traceback.format_exc())
-            raise
+        """Create an OnlineRecognizer from the model directory."""
+        return _create_online_recognizer_impl(
+            sherpa_onnx, model_dir,
+            use_gpu=self._config.use_gpu,
+            sample_rate=self._config.sample_rate,
+        )
 
     def feed_audio(self, base64_data: str) -> dict[str, Any]:
         """Decode a chunk of Base64-encoded float32 PCM audio.
@@ -854,211 +610,24 @@ class SherpaASR:
         return segments
 
     def _create_offline_recognizer(self, sherpa_onnx: Any, model_dir: Path) -> Any:
-        """Create an OfflineRecognizer from the model directory.
-
-        Model detection priority:
-        1. Qwen3-ASR (conv_frontend.onnx + encoder + decoder + tokenizer dir)
-        2. FunASR Nano (encoder_adaptor + llm + embedding + tokenizer dir)
-        3. Paraformer (model.int8.onnx or model.onnx, but not SenseVoice)
-        4. SenseVoice (model.onnx when model dir name contains "sense-voice")
-        5. Whisper (encoder.onnx + decoder.onnx)
-
-        Supports prefixed filenames (e.g. distil-large-v3.5-tokens.txt).
-        """
-        num_threads = 4
-        provider = "cpu"
-        if self._config.use_gpu:
-            provider = "cuda"
-
-        # --- Qwen3-ASR (conv_frontend.onnx) ---
-        conv_frontend = self._find_file(model_dir, "conv_frontend.onnx")
-        if conv_frontend:
-            encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
-            decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
-            tokenizer_dir = self._find_tokenizer_dir(model_dir)
-            if encoder and decoder and tokenizer_dir:
-                logger.info("Using Qwen3-ASR offline model (dir: %s)", model_dir.name)
-                # Patch: from_qwen3_asr passes 'hotwords' to OfflineQwen3ASRModelConfig
-                # which doesn't accept it. Strip it before calling.
-                _Qwen3Config = sherpa_onnx.OfflineQwen3ASRModelConfig
-                _orig_qwen3_init = _Qwen3Config.__init__
-                _Qwen3Config.__init__ = lambda self, **kw: _orig_qwen3_init(self, **{k: v for k, v in kw.items() if k != "hotwords"})
-                try:
-                    return sherpa_onnx.OfflineRecognizer.from_qwen3_asr(
-                        conv_frontend=str(conv_frontend),
-                        encoder=str(encoder),
-                        decoder=str(decoder),
-                        tokenizer=str(tokenizer_dir),
-                        num_threads=num_threads,
-                        provider=provider,
-                        max_total_len=512,
-                        max_new_tokens=128,
-                    )
-                finally:
-                    _Qwen3Config.__init__ = _orig_qwen3_init
-
-        # --- FunASR Nano (encoder_adaptor.onnx or llm.onnx) ---
-        encoder_adaptor = self._find_file(model_dir, "encoder_adaptor.int8.onnx", "encoder_adaptor.onnx")
-        llm = self._find_file(model_dir, "llm.int8.onnx", "llm.onnx")
-        if encoder_adaptor or llm:
-            if not encoder_adaptor:
-                encoder_adaptor = self._find_file(model_dir, "encoder_adaptor.int8.onnx", "encoder_adaptor.onnx")
-            if not llm:
-                llm = self._find_file(model_dir, "llm.int8.onnx", "llm.onnx")
-            embedding = self._find_file(model_dir, "embedding.int8.onnx", "embedding.onnx")
-            tokenizer_dir = self._find_tokenizer_dir(model_dir)
-            if encoder_adaptor and llm and embedding and tokenizer_dir:
-                funasr_lang = self._config.language if self._config.language != "auto" else ""
-                logger.info("Using FunASR Nano offline model (dir: %s, lang: %s)", model_dir.name, funasr_lang or "auto-detect")
-                return sherpa_onnx.OfflineRecognizer.from_funasr_nano(
-                    encoder_adaptor=str(encoder_adaptor),
-                    llm=str(llm),
-                    embedding=str(embedding),
-                    tokenizer=str(tokenizer_dir),
-                    num_threads=num_threads,
-                    language=funasr_lang,
-                    provider=provider,
-                )
-
-        # --- Paraformer / SenseVoice / Whisper (require tokens.txt) ---
-        tokens = self._find_file(model_dir, "tokens.txt")
-        if not tokens:
-            raise FileNotFoundError(f"tokens.txt not found in {model_dir}")
-
-        # Check for SenseVoice by directory name.
-        is_sense_voice = self._is_sense_voice_dir(model_dir)
-
-        # Try Paraformer model (model.int8.onnx takes priority).
-        # Skip if this is a SenseVoice model directory — SenseVoice also uses model.int8.onnx.
-        paraformer_model = None if is_sense_voice else self._find_file(model_dir, "model.int8.onnx")
-        if not paraformer_model:
-            # model.onnx could be Paraformer or SenseVoice -- use dir name to decide.
-            if not is_sense_voice:
-                paraformer_model = self._find_file(model_dir, "model.onnx")
-        if paraformer_model:
-            logger.info("Using Paraformer offline model (dir: %s)", model_dir.name)
-            return sherpa_onnx.OfflineRecognizer.from_paraformer(
-                tokens=str(tokens),
-                paraformer=str(paraformer_model),
-                num_threads=num_threads,
-                provider=provider,
-            )
-
-        # Try SenseVoice model (only if directory name indicates SenseVoice).
-        sense_voice_model = self._find_file(model_dir, "model.onnx", "model.int8.onnx")
-        if is_sense_voice and sense_voice_model:
-            sv_lang = self._config.language if self._config.language != "auto" else ""
-            logger.info("Using SenseVoice offline model (lang: %s)", sv_lang or "auto-detect")
-            return sherpa_onnx.OfflineRecognizer.from_sense_voice(
-                model=str(sense_voice_model),
-                tokens=str(tokens),
-                num_threads=num_threads,
-                language=sv_lang,
-                use_itn=True,
-                provider=provider,
-            )
-
-        # Try Cohere Transcribe model (cohere-transcribe in dir name, encoder + decoder + tokens).
-        dir_name = model_dir.name.lower()
-        if "cohere-transcribe" in dir_name or "cohere_transcribe" in dir_name:
-            cohere_encoder = self._find_file(model_dir, "encoder.int8.onnx", "encoder.onnx")
-            cohere_decoder = self._find_file(model_dir, "decoder.int8.onnx", "decoder.onnx")
-            if cohere_encoder and cohere_decoder:
-                # Map config language to cohere-transcribe language code.
-                _COHERE_LANG_MAP = {
-                    "zh": "zh", "en": "en", "ja": "ja", "ko": "ko",
-                    "de": "de", "fr": "fr", "es": "es", "it": "it",
-                    "pt": "pt", "ar": "ar", "nl": "nl", "pl": "pl",
-                    "el": "el", "vi": "vi",
-                }
-                cohere_lang = _COHERE_LANG_MAP.get(self._config.language, "en")
-                logger.info("Using Cohere Transcribe offline model (dir: %s, lang: %s)", model_dir.name, cohere_lang)
-                return sherpa_onnx.OfflineRecognizer.from_cohere_transcribe(
-                    encoder=str(cohere_encoder),
-                    decoder=str(cohere_decoder),
-                    tokens=str(tokens),
-                    num_threads=num_threads,
-                    language=cohere_lang,
-                    provider=provider,
-                )
-
-        # Fallback: try Whisper model.
-        whisper_encoder = self._find_file(model_dir, "encoder.onnx")
-        whisper_decoder = self._find_file(model_dir, "decoder.onnx")
-        if whisper_encoder and whisper_decoder:
-            # Pass user-configured language so Whisper transcribes in the
-            # correct language instead of defaulting to English.
-            whisper_lang = self._config.language if self._config.language != "auto" else ""
-            logger.info("Using Whisper offline model (lang: %s)", whisper_lang or "auto-detect")
-            return sherpa_onnx.OfflineRecognizer.from_whisper(
-                tokens=str(tokens),
-                encoder=str(whisper_encoder),
-                decoder=str(whisper_decoder),
-                num_threads=num_threads,
-                language=whisper_lang,
-                task="transcribe",
-                provider=provider,
-            )
-
-        raise FileNotFoundError(
-            f"No recognized offline model files in {model_dir}. "
-            "Expected model.onnx (SenseVoice/Paraformer) or "
-            "encoder.onnx + decoder.onnx (Whisper)."
+        """Create an OfflineRecognizer from the model directory."""
+        return _create_offline_recognizer_impl(
+            sherpa_onnx, model_dir,
+            use_gpu=self._config.use_gpu,
+            language=self._config.language,
         )
 
     def _create_vad(self, sherpa_onnx: Any, buffer_seconds: int = 600, *, streaming: bool = False) -> Any:
-        """Create a Voice Activity Detector for speech segmentation.
-
-        Args:
-            buffer_seconds: Must exceed the audio duration, otherwise
-                the VAD discards sample data and produces 0-sample segments.
-            streaming: If True, use longer min_silence_duration to avoid
-                splitting sentences mid-utterance during real-time recognition.
-        """
-        # Look for the configured VAD model in the model directory.
-        # Auto-detect: prefer v5, fall back to v4.
-        models_dir = self._model_dir()
-        if self._config.active_vad_model and self._config.active_vad_model != "auto":
-            candidates = [self._config.active_vad_model + ".onnx"]
-        else:
-            candidates = ["silero_vad_v5.onnx", "silero_vad.onnx"]
-        vad_model = None
-        for filename in candidates:
-            candidate = models_dir / filename
-            if candidate.exists():
-                vad_model = candidate
-                break
-        if vad_model is None:
-            # Fall back to sherpa-onnx built-in VAD asset path.
-            try:
-                vad_model = Path(sherpa_onnx.__file__).parent / candidates[0]
-            except Exception:
-                pass
-
-        config = sherpa_onnx.VadModelConfig()
-        if vad_model is not None and vad_model.exists():
-            config.silero_vad.model = str(vad_model)
-        # For streaming: use a multiplier on the user's setting to allow
-        # longer pauses without cutting sentences mid-phrase.
-        config.silero_vad.min_silence_duration = (
-            self._config.vad_min_silence_duration * 1.6 if streaming
-            else self._config.vad_min_silence_duration
-        )
-        config.silero_vad.min_speech_duration = self._config.vad_min_speech_duration
-        config.silero_vad.max_speech_duration = self._config.vad_max_speech_duration
-        config.silero_vad.threshold = self._config.vad_threshold
-        logger.info(
-            "VAD config: threshold=%.2f, min_silence=%.2fs, min_speech=%.2fs, "
-            "max_speech=%.1fs, model=%s, streaming=%s",
-            config.silero_vad.threshold, config.silero_vad.min_silence_duration,
-            config.silero_vad.min_speech_duration, config.silero_vad.max_speech_duration,
-            vad_model.name if vad_model and vad_model.exists() else "builtin/default",
-            streaming,
-        )
-        config.sample_rate = 16000
-
-        return sherpa_onnx.VoiceActivityDetector(
-            config, buffer_size_in_seconds=buffer_seconds
+        """Create a Voice Activity Detector for speech segmentation."""
+        return _create_vad_impl(
+            sherpa_onnx, self._model_dir(),
+            active_vad_model=self._config.active_vad_model,
+            vad_threshold=self._config.vad_threshold,
+            vad_min_silence_duration=self._config.vad_min_silence_duration,
+            vad_min_speech_duration=self._config.vad_min_speech_duration,
+            vad_max_speech_duration=self._config.vad_max_speech_duration,
+            buffer_seconds=buffer_seconds,
+            streaming=streaming,
         )
 
     # ---- Cleanup ----

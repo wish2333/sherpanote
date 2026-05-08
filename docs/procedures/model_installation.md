@@ -4,7 +4,7 @@
 
 - **ID**: WF-003
 - **Version**: 1.0.0
-- **Owner**: Model Manager (py/model_manager.py, py/model_registry.py, main.py)
+- **Owner**: Model Manager (py/model_manager.py, py/model_registry.py), ModelsMixin (py/api/models.py)
 - **Trigger**: User clicks install on model management settings page
 - **Last Updated**: 2026-04-29
 

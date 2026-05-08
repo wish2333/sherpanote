@@ -4,7 +4,7 @@
 
 - **ID**: WF-004
 - **Version**: 1.1.0
-- **Owner**: LLM Module (py/llm.py, main.py)
+- **Owner**: LLM Module (py/llm.py), AiMixin (py/api/ai.py)
 - **Trigger**: User clicks process button on EditorView, or auto-process after transcription
 - **Last Updated**: 2026-04-29
 

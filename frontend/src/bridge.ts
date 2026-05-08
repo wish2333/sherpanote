@@ -49,6 +49,15 @@ export async function call<T = unknown>(
   method: string,
   ...args: unknown[]
 ): Promise<ApiResponse<T>> {
+  // Wait for the pywebview bridge to be ready before making any call.
+  // In packaged apps, the bridge may not be injected immediately when
+  // the page loads, causing blank screens on first navigation.
+  try {
+    await waitForPyWebView();
+  } catch {
+    return { success: false, error: "pywebview API not available" };
+  }
+
   let api: PyWebViewApi;
   try {
     api = getRawApi();
@@ -58,7 +67,19 @@ export async function call<T = unknown>(
   if (!(method in api)) {
     return { success: false, error: `Method '${method}' not found on bridge` };
   }
-  return (await api[method](...args)) as ApiResponse<T>;
+  const result = await api[method](...args);
+  return isApiResponse<T>(result)
+    ? result
+    : { success: false, error: `Invalid response from '${method}'` };
+}
+
+function isApiResponse<T>(value: unknown): value is ApiResponse<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "success" in value &&
+    typeof (value as Record<string, unknown>).success === "boolean"
+  );
 }
 
 /**

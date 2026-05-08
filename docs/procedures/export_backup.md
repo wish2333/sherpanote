@@ -4,7 +4,7 @@
 
 - **ID**: WF-007
 - **Version**: 1.0.0
-- **Owner**: Storage Module, Backup Module (py/storage.py, py/backup.py, main.py)
+- **Owner**: Storage Module (py/storage.py), Backup Module (py/backup.py), ConfigBackupMixin (py/api/config_backup.py)
 - **Trigger**: User clicks export on record, or backup/restore in settings
 - **Last Updated**: 2026-04-29
 

@@ -4,7 +4,7 @@
 
 - **ID**: WF-006
 - **Version**: 2.1.0
-- **Owner**: Document Extraction Module (py/document_extractor.py, py/ocr.py, main.py)
+- **Owner**: Document Extraction Module (py/document_extractor.py, py/ocr.py), OcrPluginMixin (py/api/ocr_plugin.py)
 - **Trigger**: User uploads images/PDFs/Office docs on OcrView and starts processing
 - **Last Updated**: 2026-04-29
 

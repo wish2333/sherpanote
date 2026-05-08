@@ -177,16 +177,14 @@ cython_debug/
 
 # bun
 node_modules/
-bun.lock
 
 # Claude Code
-runCC-GLM.bat
-runCC-OR.bat
+runCC-*
 run.command
 ClaudeCode.py
 ClaudeCode.env
-.claude/
-CLAUDE.md
+.claude/settings.local.json
+CLAUDE-*
 
 # Build
 frontend_dist/

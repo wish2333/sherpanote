@@ -4,7 +4,7 @@
 
 - **ID**: WF-005
 - **Version**: 1.0.0
-- **Owner**: Storage Module (py/storage.py, main.py)
+- **Owner**: Storage Module (py/storage.py), StorageMixin (py/api/storage.py)
 - **Trigger**: User edits transcript/AI results (auto) or clicks save version (manual)
 - **Last Updated**: 2026-04-29
 

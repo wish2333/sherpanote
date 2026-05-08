@@ -86,8 +86,9 @@ class Storage:
                 "ALTER TABLE versions ADD COLUMN segments_json TEXT NOT NULL DEFAULT '[]'"
             )
             self._get_conn().commit()
-        except Exception:
-            pass  # Column already exists
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise  # Re-raise unexpected errors (permission, disk full, etc.)
         conn.commit()
 
     # ---- Record CRUD ----

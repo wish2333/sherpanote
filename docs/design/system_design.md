@@ -9,6 +9,7 @@
 
 | Version | Changed Module | Description |
 |---------|---------------|-------------|
+| v2.1.1 | Backend API, Security | Refactored main.py into 6 domain mixins (py/api/), security fixes (path traversal, ZipSlip, XSS), reliability improvements |
 | v2.1.0 | Plugins, OCR, Settings | Plugin runtime, docling/opendata adapters, DocumentSettingsPanel, fullscreen drag-drop |
 | v2.0.0 | OCR, Model Management | Added OCR engine, refactored model management |
 | v1.3.0 | ASR, Whisper, CUDA | Added whisper.cpp, GPU detection, video download |
@@ -63,19 +64,25 @@
 
 ## Module Design
 
-### Module: Backend API (`main.py`)
+### Module: Backend API (`main.py` + `py/api/`)
 
-**Purpose**: Main API class exposing all backend functionality to frontend via pywebvue Bridge.
+**Purpose**: Main API class exposing all backend functionality to frontend via pywebvue Bridge. Organized as domain-specific mixin classes composed via multiple inheritance.
 
 **Dependencies**: py, pywebvue
 
 **Key Components**:
 
-| Component | Responsibility |
-|-----------|---------------|
-| `SherpaNoteAPI(Bridge)` | Exposes all `@expose` methods as callable JS API |
-| `dispatch_task()` | Runs tasks in background thread, queues events to frontend |
-| `handle_exception()` | Global exception handler, shows error dialog |
+| Component | File | Responsibility |
+|-----------|------|---------------|
+| `SherpaNoteAPI(Bridge, AsrMixin, AiMixin, StorageMixin, ModelsMixin, OcrPluginMixin, ConfigBackupMixin)` | `main.py` | Entry point composing all domain mixins |
+| `dispatch_task()` | `main.py` | Runs tasks in background thread, queues events to frontend |
+| `handle_exception()` | `main.py` | Global exception handler, shows error dialog |
+| `AsrMixin` | `py/api/asr.py` | ASR engine control, whisper.cpp, dependency management |
+| `AiMixin` | `py/api/ai.py` | AI text processing, preset CRUD |
+| `StorageMixin` | `py/api/storage.py` | Record CRUD, version history, audio management, import/export |
+| `ModelsMixin` | `py/api/models.py` | ASR model download, install, validate |
+| `OcrPluginMixin` | `py/api/ocr_plugin.py` | OCR, plugin backends, document extraction |
+| `ConfigBackupMixin` | `py/api/config_backup.py` | Configuration, backup/restore, file picker |
 
 **Data Flow**:
 
@@ -106,7 +113,7 @@ Frontend JS call --> bridge.call('method', args) --> @expose method in SherpaNot
 | `restore_version()` | Replace record content with version snapshot |
 | `export()` | Export to md/txt/srt/docx |
 
-### Module: ASR (`py/asr.py`)
+### Module: ASR (`py/asr.py`, `py/asr_recognizer.py`, `py/file_matcher.py`)
 
 **Purpose**: Automatic Speech Recognition with multiple engine support.
 
@@ -117,6 +124,8 @@ Frontend JS call --> bridge.call('method', args) --> @expose method in SherpaNot
 | Component | Responsibility |
 |-----------|---------------|
 | ASR engine classes | sherpa-onnx and whisper.cpp backends |
+| Recognizer factories (`asr_recognizer.py`) | Online, offline, and whisper engine creation |
+| File matching (`file_matcher.py`) | Model file detection, classification, and matching (shared with model_manager) |
 | Streaming recognition | Real-time audio chunk processing |
 | File transcription | Offline transcription with progress callback |
 | VAD integration | Voice Activity Detection for simulated streaming |
@@ -434,6 +443,7 @@ OCR:
 
 - Global exception handler: `handle_exception()` catches unhandled exceptions
 - All `@expose` methods return `{ success: bool, data?, error? }` envelope
+- `@expose` decorator logs all unhandled exceptions via `logger.exception` (not silently swallowed)
 - Frontend shows error dialogs for failed API calls
 - Network errors during downloads are retried with user notification
 
