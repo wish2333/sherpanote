@@ -12,10 +12,31 @@ Processing modes:
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from py.config import AiConfig
+
+# Token estimation thresholds for _estimate_max_tokens (text length).
+_TOKEN_THRESHOLD_SHORT = 500
+_TOKEN_THRESHOLD_MEDIUM = 3000
+_TOKEN_THRESHOLD_LONG = 10000
+
+# Multipliers for auto token estimation by text length bracket.
+_TOKEN_MULTIPLIER_SHORT = 3
+_TOKEN_MULTIPLIER_MEDIUM = 2
+_TOKEN_MULTIPLIER_LONG = 1.5
+
+# Floor for auto-estimated max_tokens.
+_TOKEN_MIN_AUTO = 2048
+
+# Punctuation restore: extra tokens added to text length for max_tokens.
+_PUNCT_EXTRA_TOKENS = 200
+# Punctuation restore: hard cap for max_tokens.
+_PUNCT_MAX_TOKENS = 4096
 
 # Prompt templates for each processing mode.
 _PROMPTS: dict[str, str] = {
@@ -295,11 +316,12 @@ class AIProcessor:
                 model=self._config.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=min(len(text) + 200, 4096),
+                max_tokens=min(len(text) + _PUNCT_EXTRA_TOKENS, _PUNCT_MAX_TOKENS),
             )
             result = response.choices[0].message.content or ""
             return result.strip() if result.strip() else text
         except Exception:
+            logger.warning("restore_punctuation failed, returning original text", exc_info=True)
             return text
 
     def _estimate_max_tokens(self, text_len: int) -> int | None:
@@ -317,15 +339,15 @@ class AIProcessor:
             return self._config.max_tokens
         # "auto" mode
         configured_max = self._config.max_tokens
-        if text_len < 500:
-            estimated = text_len * 3
-        elif text_len < 3000:
-            estimated = text_len * 2
-        elif text_len < 10000:
-            estimated = int(text_len * 1.5)
+        if text_len < _TOKEN_THRESHOLD_SHORT:
+            estimated = text_len * _TOKEN_MULTIPLIER_SHORT
+        elif text_len < _TOKEN_THRESHOLD_MEDIUM:
+            estimated = text_len * _TOKEN_MULTIPLIER_MEDIUM
+        elif text_len < _TOKEN_THRESHOLD_LONG:
+            estimated = int(text_len * _TOKEN_MULTIPLIER_LONG)
         else:
             estimated = text_len
-        return max(2048, min(estimated, configured_max))
+        return max(_TOKEN_MIN_AUTO, min(estimated, configured_max))
 
     def _build_create_kwargs(self, prompt: str, stream: bool = False) -> dict[str, Any]:
         """Build kwargs for the OpenAI chat completions create call."""

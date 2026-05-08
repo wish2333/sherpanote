@@ -198,17 +198,23 @@ function renderMarkdown(md: string): string {
 
 function inlineFormat(text: string): string {
   // Bold + italic
-  text = text.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, (_, t) => `<strong><em>${escapeHtml(t)}</em></strong>`);
   // Bold
-  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/\*\*(.+?)\*\*/g, (_, t) => `<strong>${escapeHtml(t)}</strong>`);
   // Italic
-  text = text.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  text = text.replace(/\*(.+?)\*/g, (_, t) => `<em>${escapeHtml(t)}</em>`);
   // Strikethrough
-  text = text.replace(/~~(.+?)~~/g, "<del>$1</del>");
+  text = text.replace(/~~(.+?)~~/g, (_, t) => `<del>${escapeHtml(t)}</del>`);
   // Inline code
-  text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
-  // Links
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="link link-primary" target="_blank">$1</a>');
+  text = text.replace(/`([^`]+)`/g, (_, t) => `<code>${escapeHtml(t)}</code>`);
+  // Links (escape href to prevent javascript: protocol injection)
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, href) => {
+    const safeHref = escapeHtml(href);
+    if (/^(https?:\/\/|mailto:|#|\/)/i.test(href.trim())) {
+      return `<a href="${safeHref}" class="link link-primary" target="_blank">${escapeHtml(label)}</a>`;
+    }
+    return escapeHtml(`[${label}](${href})`);
+  });
   return text;
 }
 

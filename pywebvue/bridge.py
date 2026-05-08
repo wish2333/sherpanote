@@ -25,6 +25,7 @@ def expose(func: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return func(*args, **kwargs)
         except Exception as exc:
+            logger.exception("Unhandled error in %s", func.__name__)
             return {"success": False, "error": str(exc)}
 
     return wrapper

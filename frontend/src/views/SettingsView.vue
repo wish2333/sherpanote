@@ -9,6 +9,9 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useAppStore } from "../stores/appStore";
+import { useAiPresets } from "../composables/useAiPresets";
+import { useProcessingPresets } from "../composables/useProcessingPresets";
+import { useBackup } from "../composables/useBackup";
 import {
   call,
   onEvent,
@@ -24,18 +27,37 @@ import {
   installModel,
   deleteModel,
   cancelModelInstall,
-  exportBackup,
-  importBackup,
   scanOcrModels,
   downloadOcrModels,
   deleteOcrModel,
 } from "../bridge";
-import type { BackupOptions, BackupSummary } from "../bridge";
-import type { AiConfig, AsrConfig, OcrConfig, PluginConfig, DocumentConfig, AiPreset, AiProcessingPreset, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus, OcrModelFileInfo } from "../types";
+import type { AiConfig, AsrConfig, OcrConfig, PluginConfig, DocumentConfig, ModelEntry, InstalledModel, DownloadProgress, GpuStatus, WhisperBinaryStatus, DependencyStatus, OcrModelFileInfo } from "../types";
 import DocumentSettingsPanel from "../components/settings/DocumentSettingsPanel.vue";
 
 const store = useAppStore();
 const router = useRouter();
+
+const {
+  aiPresets, showPresetForm, editingPreset, presetForm,
+  deletePresetConfirmId, isTestingPreset, presetTestResult,
+  loadPresets, openNewPresetForm, openEditPresetForm,
+  cancelPresetForm, testPresetConnection, savePreset,
+  handleActivatePreset, handleDeletePreset,
+} = useAiPresets(() => loadConfig());
+
+const {
+  processingPresets, showProcessingPresetForm, editingProcessingPreset,
+  deleteProcessingPresetConfirmId, processingPresetForm, processingModeOptions,
+  loadProcessingPresets, openNewProcessingPresetForm, openEditProcessingPresetForm,
+  cancelProcessingPresetForm, saveProcessingPreset,
+  handleDeleteProcessingPreset, resetBuiltinPresets,
+} = useProcessingPresets();
+
+const {
+  backupOptions, isExporting, isImporting, importResult,
+  importConfirmOpen,
+  handleExport, handlePickImportFile, confirmImport, cancelImport,
+} = useBackup();
 
 const aiConfig = ref<AiConfig>(store.aiConfig);
 const asrConfig = ref<AsrConfig>(store.asrConfig);
@@ -85,243 +107,7 @@ const languages = [
 
 const customLanguage = ref("");
 
-// ---- AI Preset management ----
-const aiPresets = ref<AiPreset[]>([]);
-const showPresetForm = ref(false);
-const editingPreset = ref<AiPreset | null>(null);
-const presetForm = ref({
-  name: "",
-  provider: "openai",
-  model: "",
-  api_key: "" as string | null,
-  base_url: "" as string | null,
-  temperature: 0.7,
-  max_tokens: 4096,
-});
-const deletePresetConfirmId = ref<string | null>(null);
-const isTestingPreset = ref(false);
-const presetTestResult = ref<{ success: boolean; message: string } | null>(null);
-
-async function loadPresets() {
-  const res = await call<AiPreset[]>("list_ai_presets");
-  if (res.success && res.data) {
-    aiPresets.value = res.data;
-  }
-}
-
-function openNewPresetForm() {
-  editingPreset.value = null;
-  presetForm.value = {
-    name: "",
-    provider: "openai",
-    model: "",
-    api_key: "",
-    base_url: "",
-    temperature: 0.7,
-    max_tokens: 4096,
-  };
-  showPresetForm.value = true;
-}
-
-function openEditPresetForm(preset: AiPreset) {
-  editingPreset.value = preset;
-  presetForm.value = {
-    name: preset.name,
-    provider: preset.provider,
-    model: preset.model,
-    api_key: preset.api_key ?? "",
-    base_url: preset.base_url ?? "",
-    temperature: preset.temperature,
-    max_tokens: preset.max_tokens,
-  };
-  showPresetForm.value = true;
-}
-
-function cancelPresetForm() {
-  showPresetForm.value = false;
-  editingPreset.value = null;
-  presetTestResult.value = null;
-}
-
-async function testPresetConnection() {
-  isTestingPreset.value = true;
-  presetTestResult.value = null;
-  // Test using the current form values (unsaved).
-  const config = {
-    provider: presetForm.value.provider,
-    model: presetForm.value.model,
-    api_key: presetForm.value.api_key || null,
-    base_url: presetForm.value.base_url || null,
-  };
-  const res = await call<{ response: string }>("test_ai_preset_connection", config);
-  if (res.success && res.data) {
-    presetTestResult.value = { success: true, message: "Connection successful" };
-  } else {
-    presetTestResult.value = { success: false, message: res.error ?? "Connection failed" };
-  }
-  isTestingPreset.value = false;
-}
-
-async function savePreset() {
-  if (!presetForm.value.name.trim()) {
-    store.showToast("Preset name is required", "warning");
-    return;
-  }
-  const data = {
-    name: presetForm.value.name.trim(),
-    provider: presetForm.value.provider,
-    model: presetForm.value.model,
-    api_key: presetForm.value.api_key || null,
-    base_url: presetForm.value.base_url || null,
-    temperature: presetForm.value.temperature,
-    max_tokens: presetForm.value.max_tokens,
-  };
-
-  if (editingPreset.value) {
-    const res = await call("update_ai_preset", editingPreset.value.id, data);
-    if (res.success) {
-      store.showToast("Preset updated", "success");
-    } else {
-      store.showToast(res.error ?? "Failed to update preset", "error");
-    }
-  } else {
-    (data as Record<string, unknown>).is_active = aiPresets.value.length === 0;
-    const res = await call("create_ai_preset", data);
-    if (res.success) {
-      store.showToast("Preset created", "success");
-    } else {
-      store.showToast(res.error ?? "Failed to create preset", "error");
-    }
-  }
-  showPresetForm.value = false;
-  editingPreset.value = null;
-  await loadPresets();
-}
-
-async function handleActivatePreset(presetId: string) {
-  const res = await call("set_active_ai_preset", presetId);
-  if (res.success) {
-    store.showToast("Preset activated", "success");
-    await loadPresets();
-    await loadConfig();
-  } else {
-    store.showToast(res.error ?? "Failed to activate preset", "error");
-  }
-}
-
-async function handleDeletePreset(presetId: string) {
-  deletePresetConfirmId.value = null;
-  const res = await call("delete_ai_preset", presetId);
-  if (res.success) {
-    store.showToast("Preset deleted", "success");
-    await loadPresets();
-    await loadConfig();
-  } else {
-    store.showToast(res.error ?? "Failed to delete preset", "error");
-  }
-}
-
-// ---- AI Processing Preset management ----
-const processingPresets = ref<AiProcessingPreset[]>([]);
-const showProcessingPresetForm = ref(false);
-const editingProcessingPreset = ref<AiProcessingPreset | null>(null);
-const deleteProcessingPresetConfirmId = ref<string | null>(null);
-const processingPresetForm = ref({
-  name: "",
-  mode: "polish" as string,
-  prompt: "",
-});
-const processingModeOptions: { value: string; label: string }[] = [
-  { value: "polish", label: "Polish" },
-  { value: "note", label: "Notes" },
-  { value: "mindmap", label: "Mind Map" },
-  { value: "brainstorm", label: "Brainstorm" },
-  { value: "custom", label: "Custom" },
-];
-
-async function loadProcessingPresets() {
-  const res = await call<AiProcessingPreset[]>("list_processing_presets");
-  if (res.success && res.data) {
-    processingPresets.value = res.data;
-  }
-}
-
-function openNewProcessingPresetForm() {
-  editingProcessingPreset.value = null;
-  processingPresetForm.value = { name: "", mode: "polish", prompt: "" };
-  showProcessingPresetForm.value = true;
-}
-
-function openEditProcessingPresetForm(preset: AiProcessingPreset) {
-  editingProcessingPreset.value = preset;
-  processingPresetForm.value = {
-    name: preset.name,
-    mode: preset.mode,
-    prompt: preset.prompt,
-  };
-  showProcessingPresetForm.value = true;
-}
-
-function cancelProcessingPresetForm() {
-  showProcessingPresetForm.value = false;
-  editingProcessingPreset.value = null;
-}
-
-async function saveProcessingPreset() {
-  if (!processingPresetForm.value.name.trim()) {
-    store.showToast("Preset name is required", "warning");
-    return;
-  }
-  if (!processingPresetForm.value.prompt.trim()) {
-    store.showToast("Prompt is required", "warning");
-    return;
-  }
-  const data = {
-    name: processingPresetForm.value.name.trim(),
-    mode: processingPresetForm.value.mode,
-    prompt: processingPresetForm.value.prompt,
-  };
-
-  if (editingProcessingPreset.value) {
-    const res = await call("update_processing_preset", editingProcessingPreset.value.id, data);
-    if (res.success) {
-      store.showToast("Preset updated", "success");
-    } else {
-      store.showToast(res.error ?? "Failed to update preset", "error");
-    }
-  } else {
-    const res = await call("create_processing_preset", data);
-    if (res.success) {
-      store.showToast("Preset created", "success");
-    } else {
-      store.showToast(res.error ?? "Failed to create preset", "error");
-    }
-  }
-  showProcessingPresetForm.value = false;
-  editingProcessingPreset.value = null;
-  await loadProcessingPresets();
-}
-
-async function handleDeleteProcessingPreset(presetId: string) {
-  deleteProcessingPresetConfirmId.value = null;
-  const res = await call("delete_processing_preset", presetId);
-  if (res.success) {
-    store.showToast("Preset deleted", "success");
-    await loadProcessingPresets();
-  } else {
-    store.showToast(res.error ?? "Cannot delete built-in presets", "error");
-  }
-}
-
-async function resetBuiltinPresets() {
-  const res = await call("reset_builtin_presets");
-  if (res.success) {
-    store.showToast("Built-in presets restored to defaults", "success");
-    await loadProcessingPresets();
-  } else {
-    store.showToast(res.error ?? "Failed to reset presets", "error");
-  }
-}
+// ---- AI Preset and Processing Preset management (via composables) ----
 
 // ---- Model management state ----
 const availableModels = ref<ModelEntry[]>([]);
@@ -826,99 +612,10 @@ function availableModelTypes(version: string, role: string): ("mobile" | "server
   return ["mobile", "server"];
 }
 
-// ---- Backup / Restore ----
-const backupOptions = ref<BackupOptions>({
-  include_config: false,
-  include_presets: true,
-  include_records: true,
-  include_versions: true,
-  include_audio: false,
-});
-const isExporting = ref(false);
-const isImporting = ref(false);
-const importResult = ref<BackupSummary | null>(null);
-const importConfirmOpen = ref(false);
-const pendingImportPath = ref<string | null>(null);
-
-async function handleExport() {
-  const res = await pickDirectory();
-  if (!res.success || !res.data) return;
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const filename = `sherpanote_backup_${timestamp}.zip`;
-  const outputPath = `${res.data.path}/${filename}`;
-
-  isExporting.value = true;
-  try {
-    const result = await exportBackup(outputPath, backupOptions.value);
-    if (result.success) {
-      store.showToast("Backup exported successfully", "success");
-    } else {
-      store.showToast(result.error || "Export failed", "error");
-    }
-  } catch {
-    store.showToast("Export failed", "error");
-  } finally {
-    isExporting.value = false;
-  }
-}
-
-async function handlePickImportFile() {
-  const res = await pickFile(["ZIP Files (*.zip)"]);
-  if (!res.success || !res.data) return;
-  pendingImportPath.value = res.data.path;
-  importConfirmOpen.value = true;
-}
-
-async function confirmImport() {
-  if (!pendingImportPath.value) return;
-  isImporting.value = true;
-  importConfirmOpen.value = false;
-  try {
-    const result = await importBackup(pendingImportPath.value);
-    if (result.success && result.data) {
-      importResult.value = result.data;
-      store.showToast("Backup imported successfully. Reloading page...", "success");
-      // Reload config from backend
-      const configRes = await call<Record<string, unknown>>("get_config");
-      if (configRes.success && configRes.data) {
-        const cfg = configRes.data as Record<string, unknown>;
-        if (cfg.ai) {
-          const ai = cfg.ai as Record<string, unknown>;
-          store.aiConfig = {
-            provider: (ai.provider as string) ?? "openai",
-            model: (ai.model as string) ?? "gpt-4o-mini",
-            api_key: (ai.api_key as string | null) ?? null,
-            base_url: (ai.base_url as string | null) ?? null,
-            temperature: (ai.temperature as number) ?? 0.7,
-            max_tokens: (ai.max_tokens as number) ?? 8192,
-          };
-        }
-        if (cfg.asr) {
-          const asr = cfg.asr as Record<string, unknown>;
-          store.asrConfig = { ...store.asrConfig, ...Object.fromEntries(
-            Object.entries(asr).filter(([_, v]) => v !== undefined)
-          ) } as typeof store.asrConfig;
-        }
-        store.autoAiModes = (cfg.auto_ai_modes as string[]) ?? [];
-      }
-    } else {
-      store.showToast(result.error || "Import failed", "error");
-    }
-  } catch {
-    store.showToast("Import failed", "error");
-  } finally {
-    isImporting.value = false;
-    pendingImportPath.value = null;
-  }
-}
-
-function cancelImport() {
-  importConfirmOpen.value = false;
-  pendingImportPath.value = null;
-}
+// ---- Backup / Restore (via composable) ----
 
 onUnmounted(() => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
   offDownloadProgress();
   offInstallComplete();
   offInstallError();

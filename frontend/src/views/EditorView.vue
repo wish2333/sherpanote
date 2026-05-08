@@ -14,13 +14,15 @@ import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from "vue"
 import { useRouter, useRoute } from "vue-router";
 import { call, onEvent } from "../bridge";
 import { useStorage } from "../composables/useStorage";
+import { useAudioPlayback } from "../composables/useAudioPlayback";
+import { useVersionManagement } from "../composables/useVersionManagement";
 import { useAppStore } from "../stores/appStore";
 import AiProcessor from "../components/AiProcessor.vue";
 import MarkdownRenderer from "../components/MarkdownRenderer.vue";
 import MindMapPreview from "../components/MindMapPreview.vue";
 import ExportMenu from "../components/ExportMenu.vue";
 import VersionHistory from "../components/VersionHistory.vue";
-import type { TranscriptRecord, Segment, AiResults, Version } from "../types";
+import type { TranscriptRecord, AiResults } from "../types";
 
 const store = useAppStore();
 const router = useRouter();
@@ -37,21 +39,28 @@ const saveStatus = ref<"idle" | "editing" | "saving" | "saved">("idle");
 
 // Audio player
 const audioRef = ref<HTMLAudioElement | null>(null);
-const isPlaying = ref(false);
-const audioCurrentTime = ref(0);
-const audioDuration = ref(0);
 const audioDataUrl = ref("");
-const audioVolume = ref(0.8);
-const isMuted = ref(false);
+const {
+  isPlaying, audioCurrentTime, audioDuration, audioVolume, isMuted,
+  onTimeUpdate, onLoadedMetadata, togglePlayback, toggleMute, onVolumeChange,
+  seekToSegment, formatAudioTime,
+} = useAudioPlayback(audioRef, () => record.value?.segments ?? []);
+const {
+  showVersionHistory, versionCount, isSavingVersion,
+  refreshVersionCount, onVersionRestored, handleSaveVersion,
+} = useVersionManagement(
+  () => recordId.value,
+  () => record.value,
+  (r) => { record.value = r; },
+  () => editorText.value,
+  (v) => { lastVersionContent = v; },
+  (id) => saveVersion(id),
+);
 const showSegments = ref(true);
 const showAudio = ref(true);
-const showVersionHistory = ref(false);
 
 // Re-transcribe
 const isRetranscribing = ref(false);
-
-// Version count badge
-const versionCount = ref(0);
 
 const showTranscript = ref(true);
 
@@ -130,8 +139,7 @@ function removeTag(tag: string) {
 // Auto-save with debounce
 let saveTimer: ReturnType<typeof setTimeout>;
 let isInitialLoad = true; // Guard: suppress dirty flag during initial data load
-// Content of the transcript at the time of the last version snapshot.
-// Used to detect REAL changes vs no-op edits (type then delete).
+// Content at last version snapshot — detect real changes vs no-op edits
 let lastVersionContent = "";
 
 async function loadRecord() {
@@ -146,10 +154,7 @@ async function loadRecord() {
       await loadAudioDataUrl(data.audio_path);
     }
   }
-  const verRes = await call<{ length: number }>("get_version_history", recordId.value);
-  if (verRes.success && verRes.data) {
-    versionCount.value = Array.isArray(verRes.data) ? verRes.data.length : 0;
-  }
+  await refreshVersionCount();
   isLoading.value = false;
   // Allow watcher to track changes after load completes
   nextTick(() => { isInitialLoad = false; });
@@ -204,63 +209,6 @@ async function saveTitle() {
   if (updated) {
     record.value = updated;
   }
-}
-
-// Audio playback sync.
-function onTimeUpdate() {
-  if (!audioRef.value) return;
-  audioCurrentTime.value = audioRef.value.currentTime;
-  const current = audioRef.value.currentTime;
-  const segments = record.value?.segments ?? [];
-  const active = segments.find(
-    (s) => s.start_time <= current && s.end_time > current,
-  );
-  store.activeSegmentIndex = active?.index ?? -1;
-}
-
-function onLoadedMetadata() {
-  if (audioRef.value) {
-    audioDuration.value = audioRef.value.duration;
-  }
-}
-
-function togglePlayback() {
-  if (!audioRef.value) return;
-  if (isPlaying.value) {
-    audioRef.value.pause();
-  } else {
-    audioRef.value.play();
-  }
-  isPlaying.value = !isPlaying.value;
-}
-
-function toggleMute() {
-  if (!audioRef.value) return;
-  isMuted.value = !isMuted.value;
-  audioRef.value.muted = isMuted.value;
-}
-
-function onVolumeChange(value: number) {
-  audioVolume.value = value;
-  if (!audioRef.value) return;
-  audioRef.value.volume = value;
-  if (value > 0 && isMuted.value) {
-    isMuted.value = false;
-    audioRef.value.muted = false;
-  }
-}
-
-function seekToSegment(segment: Segment) {
-  if (!audioRef.value) return;
-  audioRef.value.currentTime = segment.start_time;
-  audioRef.value.play();
-  isPlaying.value = true;
-}
-
-function formatAudioTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 // ---- AI Processing ----
@@ -406,41 +354,6 @@ async function handleDeleteResult(mode: string) {
   }
 }
 
-function onVersionRestored(updated: TranscriptRecord) {
-  record.value = updated;
-  editorText.value = updated.transcript;
-  // Restore creates a new version, so update lastVersionContent
-  lastVersionContent = updated.transcript;
-  call("mark_clean", record.value.id);
-  showVersionHistory.value = false;
-  refreshVersionCount();
-}
-
-async function refreshVersionCount() {
-  const verRes = await call<Version[]>("get_version_history", recordId.value);
-  if (verRes.success && Array.isArray(verRes.data)) {
-    versionCount.value = verRes.data.length;
-  }
-}
-
-const isSavingVersion = ref(false);
-
-async function handleSaveVersion() {
-  if (!record.value || isSavingVersion.value) return;
-  isSavingVersion.value = true;
-  const ver = await saveVersion(record.value.id);
-  if (ver !== null) {
-    lastVersionContent = editorText.value;
-    store.showToast(`Version v${ver} saved`, "success");
-    // Update record.version so VersionHistory highlights the new current
-    if (record.value) {
-      record.value = { ...record.value, version: ver };
-    }
-    await refreshVersionCount();
-  }
-  isSavingVersion.value = false;
-}
-
 function hasAudio(): boolean {
   return !!audioDataUrl.value;
 }
@@ -472,23 +385,12 @@ onBeforeUnmount(async () => {
   offAiContinueComplete?.();
   offAiError?.();
 
-  // Save partial AI result if processing is still in progress (backend will
-  // save the full result on its own; this is a fallback for very long-running jobs).
+  // Fallback: save partial AI result and version on unmount
   if (isAiProcessing.value && record.value && activeResultMode.value && currentResultContent.value) {
-    try {
-      await persistResult(record.value, activeResultMode.value, currentResultContent.value);
-    } catch {
-      // Best-effort: backend will persist the complete result independently
-    }
+    try { await persistResult(record.value, activeResultMode.value, currentResultContent.value); } catch { /* best-effort */ }
   }
-
-  // Only save version if content actually differs from last version snapshot
   if (editorText.value !== lastVersionContent && record.value) {
-    try {
-      await saveVersion(record.value.id);
-    } catch {
-      // Best-effort: don't block navigation
-    }
+    try { await saveVersion(record.value.id); } catch { /* best-effort */ }
   }
 });
 </script>

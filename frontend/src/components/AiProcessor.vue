@@ -10,7 +10,7 @@
  *
  * Emits: process, selectResult, deleteResult, cancel
  */
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { call, onEvent } from "../bridge";
 import { useAppStore } from "../stores/appStore";
 import type { AiMode, AiResults, AiProcessingPreset, AiPreset } from "../types";
@@ -29,6 +29,12 @@ const emit = defineEmits<{
 }>();
 
 const store = useAppStore();
+
+const cleanupFns: Array<() => void> = [];
+onBeforeUnmount(() => {
+  cleanupFns.forEach((fn) => fn());
+  cleanupFns.length = 0;
+});
 
 const isProcessing = ref(false);
 const currentMode = ref<AiMode>("polish");
@@ -104,6 +110,9 @@ function handleProcess() {
   const presetId = getPresetId();
   isProcessing.value = true;
   truncationWarning.value = false;
+  // Clean up any previous listeners before registering new ones.
+  cleanupFns.forEach((fn) => fn());
+  cleanupFns.length = 0;
   emit("process", mode, presetId, customPrompt);
 
   const offComplete = onEvent<{ result: string; truncated: boolean }>("ai_complete", (detail) => {
@@ -113,14 +122,18 @@ function handleProcess() {
       store.showToast("Output may be truncated. Increase max_tokens in settings.", "warning");
     }
     offComplete();
+    cleanupFns.splice(cleanupFns.indexOf(offComplete), 1);
   });
+  cleanupFns.push(offComplete);
 
   const offError = onEvent<{ error: string }>("ai_error", (detail) => {
     isProcessing.value = false;
     store.showToast(detail.error, "error");
     offComplete();
     offError();
+    cleanupFns.splice(cleanupFns.indexOf(offError), 1);
   });
+  cleanupFns.push(offError);
 }
 
 function handleCancel() {

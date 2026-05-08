@@ -143,8 +143,8 @@ async function addFileEntry(p: string) {
       : "image";
   let sizeMb = 0;
   try {
-    const fs = await (window as any).pywebview?.api?.get_file_size?.(p);
-    if (fs?.success && fs.data > 0) {
+    const fs = await call<number>("get_file_size", p);
+    if (fs.success && fs.data !== undefined && fs.data > 0) {
       sizeMb = Number((fs.data / (1024 * 1024)).toFixed(2));
     }
   } catch {
@@ -168,8 +168,9 @@ async function addFiles() {
       added++;
     }
     if (added > 0) store.showToast(`已添加 ${added} 个文件`, "success");
-  } catch (e: any) {
-    store.showToast(`选择文件失败: ${e?.message ?? e}`, "error");
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    store.showToast(`选择文件失败: ${msg}`, "error");
   }
 }
 

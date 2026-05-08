@@ -4,7 +4,7 @@
  *
  * Emits debounced search events (300ms) and category changes.
  */
-import { ref, watch } from "vue";
+import { ref, watch, onBeforeUnmount } from "vue";
 import type { RecordFilter } from "../types";
 
 const props = withDefaults(
@@ -28,6 +28,7 @@ const keyword = ref(props.initialKeyword);
 const category = ref(props.initialCategory);
 
 let searchTimer: ReturnType<typeof setTimeout>;
+onBeforeUnmount(() => clearTimeout(searchTimer));
 
 function emitSearch() {
   clearTimeout(searchTimer);

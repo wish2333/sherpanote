@@ -28,6 +28,11 @@ HF_REPO_AUTHOR = "csukuangfj"
 # ModelScope repo for sherpa-onnx ASR models (Alibaba ecosystem).
 MODELSCOPE_REPO_ID = "zhaochaoqun/sherpa-onnx-asr-models"
 
+# Base URLs for download sources.
+HUGGINGFACE_BASE_URL = "https://huggingface.co"
+HF_MIRROR_BASE_URL = "https://hf-mirror.com"
+MODELSCOPE_API_BASE_URL = "https://modelscope.cn/api/v1/models"
+
 
 @dataclass(frozen=True)
 class ModelEntry:
@@ -350,18 +355,18 @@ def get_download_url(
     if source == "huggingface":
         filename = model.hf_filename or model.archive_name
         repo_id = model.hf_repo_id or f"{HF_REPO_AUTHOR}/{model.model_id}"
-        return f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+        return f"{HUGGINGFACE_BASE_URL}/{repo_id}/resolve/main/{filename}"
 
     if source == "hf_mirror":
         filename = model.hf_filename or model.archive_name
         repo_id = model.hf_repo_id or f"{HF_REPO_AUTHOR}/{model.model_id}"
-        return f"https://hf-mirror.com/{repo_id}/resolve/main/{filename}"
+        return f"{HF_MIRROR_BASE_URL}/{repo_id}/resolve/main/{filename}"
 
     if source == "ghproxy":
         if not ghproxy_domain:
             raise ValueError("ghproxy_domain is required when source is 'ghproxy'")
         domain = ghproxy_domain.rstrip("/")
-        return f"{domain}/https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{model.archive_name}"
+        return f"{domain}/{GITHUB_BASE_URL}{model.archive_name}"
 
     if source == "modelscope":
         if not model.modelscope_file_path:
@@ -369,7 +374,7 @@ def get_download_url(
                 f"Model '{model.model_id}' does not have a ModelScope file path configured"
             )
         return (
-            f"https://modelscope.cn/api/v1/models/{MODELSCOPE_REPO_ID}"
+            f"{MODELSCOPE_API_BASE_URL}/{MODELSCOPE_REPO_ID}"
             f"/repo?Revision=master&FilePath={model.modelscope_file_path}"
         )
 

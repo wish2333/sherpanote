@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -198,11 +199,15 @@ class OcrEngine:
         self._cls_model_version = cls_model_version
         self._cls_model_type = cls_model_type
         self._engine: Any = None
+        self._init_lock = threading.Lock()
 
     def initialize(self) -> None:
         """Lazily create the RapidOCR instance."""
         if self._engine is not None:
             return
+        with self._init_lock:
+            if self._engine is not None:
+                return
 
         from rapidocr import ModelType, OCRVersion, RapidOCR
 

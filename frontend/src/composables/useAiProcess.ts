@@ -73,7 +73,12 @@ export function useAiProcess() {
       startListening();
     }
 
-    await call("process_text_stream", text, targetMode, customPrompt ?? null);
+    const res = await call("process_text_stream", text, targetMode, customPrompt ?? null);
+    if (!res.success) {
+      isProcessing.value = false;
+      store.isAiProcessing = false;
+      store.showToast(res.error || "AI processing failed", "error");
+    }
   }
 
   /** Save the current AI result to a record. */
@@ -100,10 +105,14 @@ export function useAiProcess() {
   }
 
   /** Copy the current result to clipboard. */
-  function copyResult(): void {
+  async function copyResult(): Promise<void> {
     if (currentResult.value) {
-      navigator.clipboard.writeText(currentResult.value);
-      store.showToast("Copied to clipboard", "info");
+      try {
+        await navigator.clipboard.writeText(currentResult.value);
+        store.showToast("Copied to clipboard", "info");
+      } catch {
+        store.showToast("Failed to copy to clipboard", "error");
+      }
     }
   }
 
