@@ -4,7 +4,7 @@
 
 - **ID**: WF-002
 - **Version**: 1.1.0
-- **Owner**: ASR Module, Video Downloader (py/asr.py, py/video_downloader.py, main.py)
+- **Owner**: ASR Module (py/asr.py), Video Downloader (py/video_downloader.py), AsrMixin (py/api/asr.py)
 - **Trigger**: User drags audio file / clicks import / enters video URL
 - **Last Updated**: 2026-04-29
 

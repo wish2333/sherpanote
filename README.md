@@ -212,7 +212,12 @@ sherpanote/
 │   │   │   ├── useTranscript.ts      # Transcription event handling
 │   │   │   ├── useAiProcess.ts       # AI streaming and result management
 │   │   │   ├── usePlugin.ts          # Plugin install/uninstall lifecycle management
-│   │   │   └── useStorage.ts         # CRUD operations and version control
+│   │   │   ├── useStorage.ts         # CRUD operations and version control
+│   │   │   ├── useAiPresets.ts       # AI API preset CRUD (extracted from SettingsView)
+│   │   │   ├── useProcessingPresets.ts # AI processing preset templates
+│   │   │   ├── useBackup.ts          # Backup export/import logic
+│   │   │   ├── useAudioPlayback.ts   # Audio playback controls (extracted from EditorView)
+│   │   │   └── useVersionManagement.ts # Version history save/restore
 │   │   ├── stores/
 │   │   │   └── appStore.ts           # Global state (config, models, settings)
 │   │   ├── bridge.ts                 # PyWebVue bridge: call(), onEvent()
@@ -220,11 +225,13 @@ sherpanote/
 │   └── index.html
 ├── py/                 # Python backend modules
 │   ├── asr.py                 # ASR engine (streaming/offline/simulated streaming)
+│   ├── asr_recognizer.py      # Recognizer factory functions (online, offline, whisper)
+│   ├── file_matcher.py        # Shared model file matching and classification
 │   ├── llm.py                 # AI text processing with streaming
 │   ├── config.py              # App configuration management
 │   ├── storage.py             # SQLite persistence + version control
 │   ├── model_manager.py       # Model download, install, validate (5 sources)
-│   ├── model_registry.py      # Model catalog (10+ models)
+│   ├── model_registry.py      # Model catalog (10+ models) and URL constants
 │   ├── presets.py             # AI API preset management
 │   ├── processing_presets.py  # AI processing template management
 │   ├── gpu_detect.py          # NVIDIA CUDA detection and verification
@@ -235,11 +242,19 @@ sherpanote/
 │   ├── outputs/               # Unified output types (ExtractedDocument)
 │   ├── plugins/               # Plugin system
 │   │   └── runners/           # Plugin runners (docling, opendataloader)
+│   ├── api/                   # Bridge-exposed API methods (mixin architecture)
+│   │   ├── base.py            # ApiBase - shared state access
+│   │   ├── asr.py             # AsrMixin - ASR, whisper.cpp, dependencies
+│   │   ├── ai.py              # AiMixin - AI processing, presets
+│   │   ├── storage.py         # StorageMixin - record CRUD, versions, audio, import/export
+│   │   ├── models.py          # ModelsMixin - ASR model management
+│   │   ├── ocr_plugin.py      # OcrPluginMixin - OCR, plugins, document extraction
+│   │   └── config_backup.py   # ConfigBackupMixin - config, backup/restore, file picker
 │   ├── whispercpp.py          # Whisper.cpp ASR backend integration
 │   ├── video_downloader.py    # Video download for transcription
 │   └── io.py                  # Audio I/O utilities
 ├── pywebvue/           # PyWebVue framework core
-├── main.py             # Application entry point + Bridge API
+├── main.py             # Application entry point (SherpaNoteAPI composed from domain mixins)
 ├── dev.py              # Development startup script
 ├── build.py            # Build and packaging script
 └── app.spec            # PyInstaller configuration
@@ -259,6 +274,33 @@ Configuration can be modified through the **Settings** interface.
 ## Changelog
 
 See [reference/Changelog.md](reference/Changelog.md) for the full changelog.
+
+[2026-05-08 - v2.1.1 Code Quality & Security]
+
+### Security
+
+- Path traversal protection in file/folder open operations (whitelist validation)
+- ZipSlip vulnerability fix in backup import (path boundary check)
+- XSS protection in Markdown renderer (HTML escaping + link protocol whitelist)
+
+### Architecture
+
+- Refactored `main.py` from 2343 to ~250 lines by splitting SherpaNoteAPI into 6 domain-specific mixins under `py/api/`
+- Extracted `py/file_matcher.py` (shared model file matching) and `py/asr_recognizer.py` (recognizer factory)
+- Extracted 5 frontend composables from oversized views: `useAiPresets`, `useProcessingPresets`, `useBackup`, `useAudioPlayback`, `useVersionManagement`
+
+### Reliability
+
+- Fixed silent error swallowing in `@expose` decorator, AI processing, database migration, and clipboard API
+- Fixed memory leaks from uncleaned event listeners and timers on component unmount
+- Added thread safety for model download proxy configuration and OCR engine lazy initialization
+
+### Quality
+
+- Replaced 10+ magic numbers with named constants across 6 files
+- Consolidated hardcoded URLs into shared constants in `model_registry.py`
+- Improved TypeScript type safety with type guards and removed `any` casts
+- Error messages no longer leak system paths
 
 [2026-04-30 - Plugin System & Document Engine]
 

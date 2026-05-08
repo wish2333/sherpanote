@@ -4,7 +4,7 @@
 
 - **ID**: WF-001
 - **Version**: 1.0.0
-- **Owner**: ASR Module (py/asr.py, main.py)
+- **Owner**: ASR Module (py/asr.py), AsrMixin (py/api/asr.py)
 - **Trigger**: User clicks record button on RecordView
 - **Last Updated**: 2026-04-29
 

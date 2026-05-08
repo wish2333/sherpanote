@@ -52,9 +52,9 @@ Frontend (Vue 3)  <-->  pywebview JS-Python Bridge  <-->  Backend (Python)
 
 ### Entry Point Flow
 
-`main.py`:
+`main.py` (~250 lines):
 1. Pre-imports `sherpa_onnx` before pywebview (avoids Windows DLL conflicts with WebView2)
-2. Creates `SherpaNoteAPI(Bridge)` instance
+2. Creates `SherpaNoteAPI` instance (composed from 6 domain mixins via multiple inheritance)
 3. Creates `App(api, title="SherpaNote", frontend_dir="frontend_dist")`
 4. Registers `_shutdown_cleanup` via `atexit`
 5. Calls `app.run()`
@@ -68,25 +68,25 @@ Frontend (Vue 3)  <-->  pywebview JS-Python Bridge  <-->  Backend (Python)
 | `config.py` | Immutable frozen dataclasses (`AppConfig`, `AsrConfig`, etc.) persisted as JSON in SQLite |
 | `storage.py` | SQLite WAL mode, Record/Version CRUD, FTS5 full-text search, multi-format export |
 | `asr.py` | Streaming (OnlineRecognizer) and file-based (OfflineRecognizer) transcription via sherpa-onnx |
-| `asr_recognizer.py` | ASR engine abstraction layer |
+| `asr_recognizer.py` | Recognizer factory functions (online, offline, whisper engine creation) |
+| `file_matcher.py` | Shared model file matching and classification (match_model_file, find_file, classify_model_dir, etc.) |
 | `llm.py` | OpenAI-compatible API with streaming, 4 modes: polish/note/mindmap/brainstorm |
-| `ocr.py` | RapidOCR wrapper (PP-OCRv4/v5), PDF-to-image conversion |
+| `ocr.py` | RapidOCR wrapper (PP-OCRv4/v5), PDF-to-image conversion, thread-safe lazy init |
 | `document_extractor.py` | Decision tree: Images->PP-OCR, Office->markitdown, PDF->text layer detection->engine |
 | `text_detector.py` | PDF text layer detection using pdfplumber |
 | `model_manager.py` | Model download from 5 sources (GitHub, HuggingFace, HF-Mirror, GitHub Proxy, ModelScope) |
-| `model_registry.py` | ASR model definitions and registry |
+| `model_registry.py` | ASR model definitions, registry, and URL constants |
 | `whispercpp.py` | Optional whisper.cpp CLI backend |
 | `whispercpp_registry.py` | Whisper.cpp model registry (cpu/blas/cuda variants) |
 | `gpu_detect.py` | NVIDIA GPU and CUDA version auto-detection |
 | `io.py` | Audio I/O utilities |
-| `backup.py` | Data backup and restore |
+| `backup.py` | Data backup and restore (with ZipSlip protection) |
 | `video_downloader.py` | yt-dlp wrapper for video download |
 | `presets.py` | AI API preset management |
 | `processing_presets.py` | AI processing preset templates |
-| `file_matcher.py` | File type detection and matching |
 | `adapters/` | Backend wrappers producing unified `ExtractedDocument` (ppocr, markitdown, docling, opendata) |
 | `plugins/` | Subprocess-isolated runtime for optional heavy backends |
-| `api/` | Bridge-exposed API methods organized by domain |
+| `api/` | Bridge-exposed API methods, organized as mixin classes by domain |
 
 ### Plugin System
 
@@ -99,6 +99,22 @@ Optional backends (docling, opendataloader-pdf) run in a dedicated subprocess:
 - `plugins/java_detect.py` -- Java 11+ runtime detection for opendataloader-pdf
 
 Built-in backends (PP-OCR, markitdown) run in-process directly.
+
+### API Mixin Architecture (`py/api/`)
+
+The main `SherpaNoteAPI` class in `main.py` composes 6 domain-specific mixin classes via multiple inheritance:
+
+| Mixin | File | Methods | Purpose |
+|-------|------|---------|---------|
+| `ApiBase` | `api/base.py` | - | Shared `_api` property for state access |
+| `AsrMixin` | `api/asr.py` | 15 @expose | ASR engine control, whisper.cpp, dependency management |
+| `AiMixin` | `api/ai.py` | 17 @expose | AI text processing, preset CRUD |
+| `StorageMixin` | `api/storage.py` | 20 @expose | Record CRUD, version history, audio management, import/export |
+| `ModelsMixin` | `api/models.py` | 7 @expose | ASR model download, install, validate |
+| `OcrPluginMixin` | `api/ocr_plugin.py` | 16 @expose | OCR, plugin backends, document extraction |
+| `ConfigBackupMixin` | `api/config_backup.py` | 8 @expose | Configuration, backup/restore, file picker |
+
+`main.py` (~250 lines) contains only `__init__`, `dispatch_task`, and the app entry point.
 
 ---
 
@@ -131,10 +147,15 @@ Built-in backends (PP-OCR, markitdown) run in-process directly.
 |------------|---------|
 | `useRecording` | Microphone access, audio capture, recording state |
 | `useTranscript` | Transcription display, segment management |
-| `useAiProcess` | AI text processing with streaming |
+| `useAiProcess` | AI text processing with streaming, result copy |
 | `useStorage` | Record CRUD, search, export |
 | `usePlugin` | Plugin management operations |
 | `useDragDrop` | File drag-and-drop handling |
+| `useAiPresets` | AI API preset CRUD (extracted from SettingsView) |
+| `useProcessingPresets` | AI processing preset templates (extracted from SettingsView) |
+| `useBackup` | Backup export/import logic (extracted from SettingsView) |
+| `useAudioPlayback` | Audio playback controls (extracted from EditorView) |
+| `useVersionManagement` | Version history save/restore (extracted from EditorView) |
 
 ---
 

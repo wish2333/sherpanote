@@ -4,6 +4,50 @@ All notable changes to SherpaNote are documented here.
 
 ---
 
+## [2.1.1] - 2026-05-08
+
+### Security
+
+- Path traversal protection in `open_file`/`open_folder` -- `Path.resolve()` + data directory whitelist validation
+- ZipSlip vulnerability fix in backup import -- validate extracted paths stay within target directory
+- XSS protection in MarkdownRenderer -- HTML escaping for all regex captures, protocol whitelist for links (http/https/mailto only)
+
+### Reliability
+
+- `@expose` decorator now logs unhandled exceptions instead of silently swallowing them
+- `restore_punctuation` logs warnings on failure instead of silently returning original text
+- Database migration catches `sqlite3.OperationalError` precisely (only ignores "duplicate column")
+- AiProcessor event listeners cleaned up on component unmount to prevent memory leaks
+- `os.environ` modifications in model downloads protected with `threading.Lock` for thread safety
+- Timer cleanup on unmount for SearchBar and SettingsView debounce/autosave timers
+- VersionHistory `isLoading` state protected with `try/finally` against stuck loading
+
+### Changed
+
+- **Architecture refactor**: `main.py` SherpaNoteAPI (2343 lines) split into 6 domain mixins under `py/api/`:
+  - `AsrMixin` (ASR, whisper.cpp, dependency management)
+  - `AiMixin` (AI processing, preset management)
+  - `StorageMixin` (record CRUD, version history, audio management, import/export)
+  - `ModelsMixin` (ASR model management)
+  - `OcrPluginMixin` (OCR, plugin backends, document extraction)
+  - `ConfigBackupMixin` (configuration, backup/restore, file picker)
+- **File size reduction**: Extracted `py/file_matcher.py` (shared model file matching), `py/asr_recognizer.py` (recognizer factory), reducing `py/asr.py` from 1077 to 651 lines
+- **Frontend composable extraction**: 5 new composables from oversized views:
+  - `useAiPresets.ts`, `useProcessingPresets.ts`, `useBackup.ts` (from SettingsView)
+  - `useAudioPlayback.ts`, `useVersionManagement.ts` (from EditorView)
+- **Code quality**: 10+ magic numbers replaced with named constants across 6 files
+- **Code quality**: Hardcoded HuggingFace/Mirror/ModelScope URLs consolidated into `model_registry.py` constants
+- **Type safety**: Added `isApiResponse<T>` type guard in `bridge.ts`, removed `any` casts in `OcrView.vue`
+- **Type safety**: Added return type annotations to 4 adapter getter methods in `document_extractor.py`
+- **Security**: Error messages in `open_file`/`open_folder` no longer leak system paths
+- **Reliability**: `processText` checks API response success and resets `isProcessing` on failure
+- **Reliability**: `copyResult` handles clipboard API failures with user-facing error messages
+- **Reliability**: OCR engine lazy initialization protected with `threading.Lock`
+- Removed debug `print` statement in `pywebvue/app.py` (replaced with `logger.debug`)
+- Frontend `bun.lock` now tracked in git for reproducible builds
+
+---
+
 ## [2.1.0] - 2026-05-01
 
 ### Added
