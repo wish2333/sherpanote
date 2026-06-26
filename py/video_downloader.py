@@ -21,6 +21,66 @@ logger = logging.getLogger(__name__)
 # Default audio bitrate (kbps) for extracted MP3.
 _DEFAULT_AUDIO_QUALITY = "192"
 
+# --- Bilibili playurl endpoint workaround -----------------------------------
+# Bilibili returns HTTP 412 (Precondition Failed) on its WBI-signed playurl
+# endpoint when the request lacks certain cookies (unauthenticated downloads).
+# The legacy non-WBI endpoint ``/x/player/playurl`` does not enforce this check,
+# so we rewrite the URL inside yt-dlp's bundled extractor. This mirrors the fix
+# discussed in upstream issues and is a no-op if yt-dlp ships its own fix or
+# removes the method entirely.
+_PATCH_MARKER = "_sherpanote_bili_playurl_patched"
+
+
+def _apply_bilibili_playurl_patch() -> None:
+    """Rewrite Bilibili's WBI playurl endpoint to the non-WBI variant.
+
+    Idempotent: safe to call multiple times. Silently skips if the extractor
+    module cannot be located or is already patched (including by a future
+    upstream release that resolves the issue differently).
+    """
+    try:
+        from yt_dlp.extractor import bilibili as _bili
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("bilibili extractor unavailable, skipping playurl patch: %s", exc)
+        return
+
+    if getattr(_bili, _PATCH_MARKER, False):
+        return
+
+    ie_cls = getattr(_bili, "BilibiliBaseIE", None)
+    if ie_cls is None or not hasattr(ie_cls, "_download_playinfo"):
+        logger.debug("BilibiliBaseIE._download_playinfo not found; patch not applied")
+        return
+
+    def _patched_download_playinfo(self, bvid, cid, headers=None, query=None):
+        # Reproduce the original logic but target the legacy non-WBI endpoint,
+        # which is not behind Bilibili's 412 risk-control wall. WBI signing is
+        # still applied (harmless against the legacy endpoint).
+        params = {"bvid": bvid, "cid": cid, "fnval": 4048, **(query or {})}
+        if self.is_logged_in:
+            params.pop("try_look", None)
+        qn = params.get("qn")
+        note = (
+            f"Downloading video format {qn} for cid {cid}"
+            if qn
+            else f"Downloading video formats for cid {cid}"
+        )
+        return self._download_json(
+            "https://api.bilibili.com/x/player/playurl",
+            bvid,
+            query=self._sign_wbi(params, bvid),
+            headers=headers,
+            note=note,
+        )["data"]
+
+    ie_cls._download_playinfo = _patched_download_playinfo
+    setattr(_bili, _PATCH_MARKER, True)
+    logger.info("Applied Bilibili playurl endpoint patch (wbi/playurl -> playurl)")
+
+
+# Apply at import time so any yt-dlp invocation benefits.
+_apply_bilibili_playurl_patch()
+
 
 @dataclass(frozen=True)
 class VideoDownloadConfig:

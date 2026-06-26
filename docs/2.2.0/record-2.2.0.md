@@ -1,7 +1,8 @@
 # SherpaNote v2.2.0 修改记录
 
 > **基线提交**：`2cec805` — feat(docs): 更新文档以反映v2.1.1版本的架构重构、安全性修复和可靠性改进（2026-05-08）
-> **记录日期**：2026-05-09
+> **首次提交**：`c656e01` — chore(init): v2.2.0 版本初始化与文档结构整理（2026-05-09 → 2026-06-26）
+> **记录日期**：2026-06-26
 > **当前分支**：`dev-2.2.0`
 
 ---
@@ -13,6 +14,25 @@
 ---
 
 ## 二、变更详情
+
+### 0. 修复 Bilibili 视频下载 412 报错（yt-dlp）
+
+**问题**：从 B 站 URL 下载音频时报 `HTTP Error 412: Precondition Failed`，导致下载转录功能不可用。
+
+**根因**：B 站对其 WBI 签名的 playurl 接口（`api.bilibili.com/x/player/wbi/playurl`）加了风控——当请求缺少特定 cookie（未登录态）时返回 412。yt-dlp 内置的 Bilibili 提取器在未提供登录 cookie 时会命中此风控；旧版 yt-dlp（2026.3.17）甚至在网页抓取阶段就被拦截。
+
+**修复**：
+1. 升级 yt-dlp `2026.3.17` → `2026.6.9`（新版改进了网页阶段的请求，能通过网页抓取）。
+2. 在 `py/video_downloader.py` 导入时对 yt-dlp 的 `BilibiliBaseIE._download_playinfo` 打补丁，将播放地址请求从风控接口 `/x/player/wbi/playurl` 改写为 legacy 接口 `/x/player/playurl`（后者未启用 412 风控校验）。补丁幂等、带防御性跳过，未来 yt-dlp 上游修复或移除该方法时自动失效。
+
+**验证**：用测试视频 `BV14p7G6dEBZ` 端到端验证——元数据获取、音频下载（26.99MiB）、MP3 提取（37.5MB）、进度回调均正常，临时文件已清理。
+
+| 文件 | 变更 |
+|------|------|
+| `pyproject.toml` | `yt-dlp==2026.3.17` → `yt-dlp==2026.6.9` |
+| `py/video_downloader.py` | 新增 `_apply_bilibili_playurl_patch()`，导入时自动应用 |
+
+> **注意**：此补丁为针对 B 站风控的临时 workaround。若 yt-dlp 后续版本上游修复了该问题，可在升级版本后移除补丁；补丁逻辑本身对已修复版本无副作用（legacy 端点始终可用）。
 
 ### 1. 版本号升级（2.1.0 → 2.2.0）
 
