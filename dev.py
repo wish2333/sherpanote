@@ -27,7 +27,7 @@ How it works
 
     1. uv sync                        Install Python dependencies
     2. npm/bun install                 Install frontend dependencies
-    3. Start Vite dev server           Background process at :5173
+    3. Start Vite dev server           Background process at :5200
     4. Start main.py                   Launch the pywebview window
     5. On exit (Ctrl+C or window close): stop all background processes
 
@@ -141,7 +141,7 @@ def _start_vite(frontend_dir: Path, pm: str) -> None:
     _spawn_bg([pm, "run", "dev"], cwd=frontend_dir)
     import time
     time.sleep(2)
-    _info("    Vite should be running at http://localhost:5173")
+    _info("    Vite should be running at http://localhost:5200")
 
 
 def _start_app(env_extra: dict[str, str] | None = None) -> None:
